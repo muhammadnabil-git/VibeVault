@@ -54,6 +54,14 @@ data class FeedState(
     val previewFailed: Boolean = false,
 )
 
+data class HomeRecommendations(
+    val music: List<FeedItem> = emptyList(),
+    val videos: List<FeedItem> = emptyList(),
+    val musicFailed: Boolean = false,
+    val videosFailed: Boolean = false,
+    val loading: Boolean = false,
+)
+
 /** A website the Search tab can search. [prefix] = searched by the download engine; otherwise by a web search limited to [webDomain]. */
 class SiteSpec(val label: String, val prefix: String?, val webDomain: String?, val audio: Boolean)
 

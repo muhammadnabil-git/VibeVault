@@ -1,7 +1,5 @@
 package com.example.ytsaver
 
-import android.graphics.Bitmap
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,29 +29,19 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withContext
 import java.util.Calendar
 
 /** Which sections of the Home dashboard are shown. Stored on the phone; the user can change them with "Customize". */
@@ -79,7 +67,7 @@ fun HomeTab(vm: DownloaderViewModel) {
     val ctx = LocalContext.current
     val history by vm.history.collectAsStateWithLifecycle()
     val job by vm.state.collectAsStateWithLifecycle()
-    val feed by vm.feed.collectAsStateWithLifecycle()
+    val recommendations by vm.recommendations.collectAsStateWithLifecycle()
     var customize by remember { mutableStateOf(false) }
     // the shown sections are read again after the dialog closes
     var version by remember { mutableStateOf(0) }
@@ -90,69 +78,8 @@ fun HomeTab(vm: DownloaderViewModel) {
         val byUri = history.associateBy { it.uri }
         PlayLog.recent(ctx, 12).mapNotNull { byUri[it] }
     }
-    val audioQuery = remember(history, playedItems, feed.searchedQuery) {
-        feed.searchedQuery.takeIf { it.isNotBlank() }
-            ?: (playedItems.firstOrNull { it.format == "MP3" }
-                ?: history.filter { it.format == "MP3" }.maxByOrNull { it.timeMillis })
-                ?.let { TrackArt.artistFromName(it.name) ?: prettyName(it.name) }
-                .orEmpty()
-    }
-    val recentChannel = feed.siteResults["YouTube"]?.firstOrNull()?.uploader?.takeIf { it.isNotBlank() }
-    val videoQuery = remember(history, playedItems, feed.searchedQuery, recentChannel) {
-        feed.searchedQuery.takeIf { it.isNotBlank() }
-            ?: recentChannel
-            ?: (playedItems.firstOrNull { it.format == "MP4" }
-                ?: history.filter { it.format == "MP4" }.maxByOrNull { it.timeMillis })
-                ?.let { prettyName(it.name) }
-                .orEmpty()
-    }
     val audioRecommendationsOn = show["recommend_audio"] == true && Prefs.homeRecommendations(ctx, "audio")
     val videoRecommendationsOn = show["recommend_video"] == true && Prefs.homeRecommendations(ctx, "video")
-    var recommendedAudio by remember { mutableStateOf<List<FeedItem>>(emptyList()) }
-    var recommendedVideos by remember { mutableStateOf<List<FeedItem>>(emptyList()) }
-    var recommendationError by remember { mutableStateOf(false) }
-    var recommendationsLoading by remember { mutableStateOf(false) }
-
-    LaunchedEffect(audioQuery, videoQuery, audioRecommendationsOn, videoRecommendationsOn) {
-        if (!audioRecommendationsOn && !videoRecommendationsOn) return@LaunchedEffect
-        if ((!audioRecommendationsOn || audioQuery.isBlank()) && (!videoRecommendationsOn || videoQuery.isBlank())) {
-            recommendedAudio = emptyList()
-            recommendedVideos = emptyList()
-            recommendationError = false
-            recommendationsLoading = false
-            return@LaunchedEffect
-        }
-        recommendedAudio = emptyList()
-        recommendedVideos = emptyList()
-        recommendationError = false
-        recommendationsLoading = true
-        try {
-            val results = withContext(Dispatchers.IO) {
-                DownloadEngine.state.first { it.engineReady }
-                coroutineScope {
-                    val audio = async {
-                        if (!audioRecommendationsOn || audioQuery.isBlank()) emptyList<FeedItem>()
-                        else FeedLoader.search("$audioQuery official audio").map {
-                            it.copy(url = it.url.replace("www.youtube.com", "music.youtube.com"), isAudio = true)
-                        }
-                    }
-                    val videos = async {
-                        if (!videoRecommendationsOn || videoQuery.isBlank()) emptyList<FeedItem>()
-                        else FeedLoader.search("$videoQuery official music video")
-                    }
-                    audio.await() to videos.await()
-                }
-            }
-            recommendedAudio = results.first
-            recommendedVideos = results.second
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            recommendationError = true
-        } finally {
-            recommendationsLoading = false
-        }
-    }
 
     fun play(item: HistoryItem) {
         if (fileExists(ctx, item)) vm.playNow(listOf(item))
@@ -209,8 +136,8 @@ fun HomeTab(vm: DownloaderViewModel) {
         if (audioRecommendationsOn) {
             VvSectionHeader(tr("Recommended music", "موسيقى مقترحة"))
             RecommendationRow(
-                items = recommendedAudio,
-                emptyMessage = recommendationEmptyMessage(audioQuery, recommendationError, recommendationsLoading),
+                items = recommendations.music,
+                emptyMessage = recommendationEmptyMessage(recommendations.musicFailed, recommendations.loading),
                 onClick = vm::openBrowser,
             )
         }
@@ -218,8 +145,8 @@ fun HomeTab(vm: DownloaderViewModel) {
         if (videoRecommendationsOn) {
             VvSectionHeader(tr("Recommended videos", "فيديوهات مقترحة"))
             RecommendationRow(
-                items = recommendedVideos,
-                emptyMessage = recommendationEmptyMessage(videoQuery, recommendationError, recommendationsLoading),
+                items = recommendations.videos,
+                emptyMessage = recommendationEmptyMessage(recommendations.videosFailed, recommendations.loading),
                 onClick = vm::openBrowser,
             )
         }
@@ -311,10 +238,9 @@ private fun sectionName(id: String) = when (id) {
     else -> L.t("Your library", "مكتبتك")
 }
 
-private fun recommendationEmptyMessage(query: String, failed: Boolean, loading: Boolean): String = when {
-    failed -> L.t("Recommendations are temporarily unavailable.", "التوصيات غير متاحة مؤقتًا.")
-    query.isBlank() -> L.t("Play or save music or videos to get recommendations.", "شغّل أو احفظ موسيقى أو فيديوهات للحصول على توصيات.")
+private fun recommendationEmptyMessage(failed: Boolean, loading: Boolean): String = when {
     loading -> L.t("Searching for recommendations…", "جارٍ البحث عن توصيات…")
+    failed -> L.t("Recommendations are temporarily unavailable.", "التوصيات غير متاحة مؤقتًا.")
     else -> L.t("No recommendations found.", "لم يتم العثور على توصيات.")
 }
 

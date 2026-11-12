@@ -89,19 +89,20 @@ private fun ItemsTab(vm: DownloaderViewModel, history: Boolean) {
     // Audio / Video tab, sort order and the open row live in the ViewModel: they are still there after media was played
     val sub by vm.historySub.collectAsStateWithLifecycle()          // 0 = audio, 1 = video
     var selectMode by remember { mutableStateOf(false) }
-    // view: 0 = list, 1 = grid, 2 = sliders (Audio and Video rows on ONE page); the old grid on/off flag is migrated
+    // History supports List and Sliders; old saved Grid mode is migrated to List.
     val viewPrefKey = if (history) "history_view" else "media_view"
     val viewDefault = if (history) 0 else 2
-    var viewMode by remember {
-        mutableIntStateOf(
-            Prefs.str(ctx, viewPrefKey)?.toIntOrNull()
-                ?: if (!history && Prefs.bool(ctx, "media_grid", false)) 1 else viewDefault,
-        )
+    var viewMode by remember(history) {
+        val saved = Prefs.str(ctx, viewPrefKey)?.toIntOrNull()
+        val mode = if (history && saved == 1) 0
+        else saved ?: if (!history && Prefs.bool(ctx, "media_grid", false)) 1 else viewDefault
+        if (history && saved == 1) Prefs.putStr(ctx, viewPrefKey, "0")
+        mutableIntStateOf(mode)
     }
     var viewMenu by remember { mutableStateOf(false) }
     var filtersExpanded by remember { mutableStateOf(false) }
     var moreMenu by remember { mutableStateOf(false) }
-    val grid = viewMode == 1
+    val grid = !history && viewMode == 1
     val sliders = viewMode == 2
     var selected by remember { mutableStateOf(setOf<String>()) }   // uris
     val expanded by vm.historyExpanded.collectAsStateWithLifecycle()   // the one row that is open
@@ -366,11 +367,18 @@ private fun ItemsTab(vm: DownloaderViewModel, history: Boolean) {
                             )
                         }
                         DropdownMenu(expanded = viewMenu, onDismissRequest = { viewMenu = false }) {
-                            listOf(
-                                0 to "☰  " + tr("List view", "عرض قائمة"),
-                                1 to "▦  " + tr("Grid view", "عرض شبكة"),
-                                2 to "≋  " + tr("Sliders (Audio + Video)", "شرائح (صوت + فيديو)"),
-                            ).forEach { (mode, label) ->
+                            (if (history) {
+                                listOf(
+                                    0 to "☰  " + tr("List view", "عرض قائمة"),
+                                    2 to "≋  " + tr("Sliders (Audio + Video)", "شرائح (صوت + فيديو)"),
+                                )
+                            } else {
+                                listOf(
+                                    0 to "☰  " + tr("List view", "عرض قائمة"),
+                                    1 to "▦  " + tr("Grid view", "عرض شبكة"),
+                                    2 to "≋  " + tr("Sliders (Audio + Video)", "شرائح (صوت + فيديو)"),
+                                )
+                            }).forEach { (mode, label) ->
                                 DropdownMenuItem(
                                     text = { Text(label, fontWeight = if (viewMode == mode) FontWeight.Bold else FontWeight.Normal) },
                                     onClick = {
@@ -1190,7 +1198,7 @@ private fun HistoryGridCard(
         ),
     ) {
         Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(Modifier.size(90.dp).clip(RoundedCornerShape(Vv.rSmall))) {
+            Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(Vv.rSmall))) {
                 when {
                     item.format == "MP4" && showThumb -> VideoThumb(item, Modifier.fillMaxSize())
                     item.format == "MP4" -> Box(
@@ -1201,7 +1209,7 @@ private fun HistoryGridCard(
                 }
                 if (selectMode) Checkbox(checked = isSelected, onCheckedChange = { onToggleSelect() }, modifier = Modifier.align(Alignment.TopStart))
             }
-            Text(prettyName(item.name), fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(prettyName(item.name), fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(listOfNotNull(source, item.format, q).joinToString(" • "), color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("${formatSize(item.sizeBytes)} • ${SimpleDateFormat("MMM d", Locale.getDefault()).format(item.timeMillis)}",
                 color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

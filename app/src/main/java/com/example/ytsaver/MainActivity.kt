@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.platform.LocalContext
@@ -38,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -251,10 +254,14 @@ fun App(vm: DownloaderViewModel) {
         } else if (browserUrl != null) {
             BrowserScreen(vm, browserUrl.orEmpty(), onClose = vm::closeBrowser)
         } else if (radioOpen) {
-            RadioScreen(vm, onClose = vm::closeRadio)
+            Box(Modifier.weight(1f).fillMaxWidth().mainPagesSwipe(1, vm)) {
+                RadioScreen(vm, onClose = vm::closeRadio)
+            }
             if (queue.isNotEmpty() && !Radio.isRadioPlaying()) MiniPlayer(onOpen = vm::openPlayer, onStop = vm::stopPlayback)
         } else if (detectorOpen) {
-            DetectorScreen(vm, onClose = vm::closeDetector)
+            Box(Modifier.weight(1f).fillMaxWidth().mainPagesSwipe(0, vm)) {
+                DetectorScreen(vm, onClose = vm::closeDetector)
+            }
         } else if (settingsOpen) {
             SettingsScreen(vm, onClose = vm::closeSettings)
         } else if (favoritesOpen || playlistsOpen) {
@@ -350,7 +357,13 @@ fun App(vm: DownloaderViewModel) {
                 }
             }
 
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+            val swipePage = when (tab) {
+                1 -> 2
+                2 -> 3
+                3 -> 4
+                else -> null
+            }
+            Box(Modifier.weight(1f).fillMaxWidth().then(if (swipePage == null) Modifier else Modifier.mainPagesSwipe(swipePage, vm))) {
                 LogoWatermark()
                 when (tab) {
                     0 -> FeedTab(vm)
@@ -510,5 +523,33 @@ private fun RowScope.BottomTab(selected: Boolean, label: String, onClick: () -> 
     ) {
         icon(color)
         Text(label, color = color, fontSize = 11.sp, maxLines = 1)
+    }
+}
+
+private fun Modifier.mainPagesSwipe(page: Int, vm: DownloaderViewModel): Modifier = pointerInput(page) {
+    var drag = 0f
+    val threshold = 72.dp.toPx()
+    detectHorizontalDragGestures(
+        onHorizontalDrag = { _, amount -> drag += amount },
+        onDragEnd = {
+            if (abs(drag) >= threshold) {
+                val destination = page + if (drag < 0f) 1 else -1
+                if (destination in 0..4) openMainSwipePage(vm, destination)
+            }
+            drag = 0f
+        },
+        onDragCancel = { drag = 0f },
+    )
+}
+
+private fun openMainSwipePage(vm: DownloaderViewModel, page: Int) {
+    vm.closeDetector()
+    vm.closeRadio()
+    when (page) {
+        0 -> { vm.setTab(4); vm.openDetector() }
+        1 -> { vm.setTab(4); vm.openRadio() }
+        2 -> vm.setTab(1)
+        3 -> vm.setTab(2)
+        4 -> vm.setTab(3)
     }
 }

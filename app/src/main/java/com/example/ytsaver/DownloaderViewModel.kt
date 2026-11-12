@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +30,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 /**
  * One link box in the Download tab. Every box has its own format + quality.
@@ -602,6 +604,63 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
     private val _feed = MutableStateFlow(FeedState())
     val feed: StateFlow<FeedState> = _feed.asStateFlow()
     private var feedJob: Job? = null
+    private val _recommendations = MutableStateFlow(HomeRecommendations())
+    val recommendations: StateFlow<HomeRecommendations> = _recommendations.asStateFlow()
+    private var recommendationJob: Job? = null
+
+    /**
+     * Keep Home recommendations in the ViewModel so changing pages does not discard results.
+     * The only callers are app startup, Search, and successful download completion.
+     */
+    fun refreshRecommendations(searchQuery: String? = null) {
+        recommendationJob?.cancel()
+        val saved = HistoryStore.items.value.filterNot { it.isDeviceFile }
+        val latestAudio = saved.filter { it.format == "MP3" }.maxByOrNull { it.timeMillis }
+        val latestVideo = saved.filter { it.format == "MP4" }.maxByOrNull { it.timeMillis }
+        val audioTopic = latestAudio?.let { TrackArt.artistFromName(it.name) ?: prettyName(it.name) }
+        val searchedChannel = _feed.value.siteResults["YouTube"]?.firstOrNull()?.uploader?.takeIf { it.isNotBlank() }
+        val videoTopic = searchQuery?.takeIf { it.isNotBlank() }
+            ?: latestVideo?.let { prettyName(it.name) }
+            ?: searchedChannel
+        val region = Locale.getDefault().country.takeIf { it.isNotBlank() } ?: "Worldwide"
+        val musicQuery = audioTopic?.let { "$it official song" } ?: "YouTube Music trending songs $region"
+        val videoQuery = videoTopic?.let { "$it official music video" } ?: "YouTube trending videos $region"
+        val youtubeMusic = SiteSpec("YouTube Music", "ytsearch", null, true)
+        val youtube = SiteSpec("YouTube", "ytsearch", null, false)
+
+        _recommendations.update { it.copy(loading = true, musicFailed = false, videosFailed = false) }
+        recommendationJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                DownloadEngine.state.first { it.engineReady }
+                val (musicResults, videoResults) = coroutineScope {
+                    val music = async { FeedLoader.searchSiteTimed(youtubeMusic, musicQuery, 12) }
+                    val videos = async { FeedLoader.searchSiteTimed(youtube, videoQuery, 12) }
+                    music.await() to videos.await()
+                }
+                val music = musicResults?.mapNotNull { item ->
+                    val id = sourceId(item.url).takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) } ?: return@mapNotNull null
+                    item.copy(
+                        url = "https://music.youtube.com/watch?v=$id",
+                        site = "YouTube Music",
+                        isAudio = true,
+                    )
+                }
+                _recommendations.update { current ->
+                    current.copy(
+                        music = music ?: current.music,
+                        videos = videoResults?.map { it.copy(site = "YouTube", isAudio = false) } ?: current.videos,
+                        musicFailed = musicResults == null,
+                        videosFailed = videoResults == null,
+                        loading = false,
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _recommendations.update { it.copy(musicFailed = true, videosFailed = true, loading = false) }
+            }
+        }
+    }
 
     fun setFeedQuery(q: String) { _feed.update { it.copy(query = q) } }
 
@@ -725,6 +784,7 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
         feedJob?.cancel()
         previewJob?.cancel()
         val link = parseLinks(q).firstOrNull()
+        if (link == null) refreshRecommendations(q)
         val limit = _searchLimit.value
         val sites = if (link != null) listOf(LINK_SITE) else SEARCH_SITES.map { it.label }
         _feed.update {
@@ -741,6 +801,9 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
                 if (link != null) {
                     val items = try { FeedLoader.search(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
                     publishSite(LINK_SITE, items?.map { it.copy(site = siteLabelOf(it.url), isAudio = guessIsAudio(it.url)) }, false)
+                    refreshRecommendations(items?.firstOrNull()?.let { result ->
+                        result.uploader.takeIf { it.isNotBlank() } ?: result.title
+                    })
                 } else {
                     coroutineScope {
                         SEARCH_SITES.forEach { spec ->
@@ -1073,13 +1136,17 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
                     )
                 }
             }
+            refreshRecommendations()
         }
         // When a download finishes while the app is on screen, jump to the History tab
         viewModelScope.launch {
             var last = Phase.Idle
             DownloadEngine.state.collect { s ->
                 if (s.phase == Phase.Done && last != Phase.Done && appInForeground && _autoHistory.value) _tab.value = 2
-                if (last == Phase.Working && s.phase != Phase.Working) finishRun(s)
+                if (last == Phase.Working && s.phase != Phase.Working) {
+                    finishRun(s)
+                    if (s.phase == Phase.Done && s.okKeys.any { it !in s.badKeys }) refreshRecommendations()
+                }
                 last = s.phase
             }
         }
