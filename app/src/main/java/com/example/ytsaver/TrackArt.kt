@@ -61,19 +61,21 @@ object TrackArt {
 
     /** Blocking: call from a background thread. */
     fun load(ctx: Context, item: HistoryItem): Bitmap? {
-        mem.get(item.uri)?.let { return it }
+        val cacheKey = if (item.location == "radio") "${item.uri}|${item.artworkUrl.orEmpty()}" else item.uri
+        mem.get(cacheKey)?.let { return it }
         val now = System.currentTimeMillis()
-        if ((noArt[item.uri] ?: 0L) > now) return null
+        if ((noArt[cacheKey] ?: 0L) > now) return null
         val bmp = when {
+            item.location == "radio" -> item.artworkUrl?.takeIf { it.startsWith("http") }?.let { download(it)?.let(::decode) }
             isQuranRecitation(item.name, item.sourceUrl) -> quranCover(ctx)
             item.format == "MP3" -> audioArt(ctx, item)
             else -> videoArt(ctx, item)
         }
         if (bmp != null) {
-            mem.put(item.uri, bmp)
-            noArt.remove(item.uri)
+            mem.put(cacheKey, bmp)
+            noArt.remove(cacheKey)
         } else {
-            noArt[item.uri] = now + MISS_RETRY_MS
+            noArt[cacheKey] = now + MISS_RETRY_MS
         }
         return bmp
     }
@@ -417,7 +419,7 @@ object TrackArt {
 @Composable
 fun TrackArtImage(item: HistoryItem, modifier: Modifier = Modifier, iconSize: Dp) {
     val ctx = LocalContext.current
-    val bmp by produceState<Bitmap?>(null, item.uri) {
+    val bmp by produceState<Bitmap?>(null, item.uri, item.artworkUrl) {
         value = withContext(Dispatchers.IO) { TrackArt.load(ctx, item) }
     }
     val cs = MaterialTheme.colorScheme

@@ -2,6 +2,7 @@ package com.example.ytsaver
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -137,6 +138,7 @@ object PlayerHolder {
                 name = m.mediaMetadata.title?.toString() ?: m.mediaId.substringAfterLast('/'),
                 format = "MP3", quality = 0, sizeBytes = 0L, timeMillis = System.currentTimeMillis(),
                 location = "", uri = m.mediaId, sourceUrl = "",
+                artworkUrl = m.mediaMetadata.artworkUri?.toString(),
             )
         }
     }
@@ -179,12 +181,15 @@ object PlayerHolder {
         p.setAudioAttributes(MEDIA_ATTRIBUTES, true)
     }
 
-    private fun mediaItemOf(h: HistoryItem): MediaItem =
-        MediaItem.Builder()
+    private fun mediaItemOf(h: HistoryItem): MediaItem {
+        val metadata = MediaMetadata.Builder().setTitle(prettyName(h.name))
+        h.artworkUrl?.takeIf { it.startsWith("http") }?.let { metadata.setArtworkUri(Uri.parse(it)) }
+        return MediaItem.Builder()
             .setMediaId(h.uri)
             .setUri(h.uri)
-            .setMediaMetadata(MediaMetadata.Builder().setTitle(prettyName(h.name)).build())
+            .setMediaMetadata(metadata.build())
             .build()
+    }
 
     private fun ensureService(ctx: Context) {
         try {

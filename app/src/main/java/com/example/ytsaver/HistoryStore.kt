@@ -20,6 +20,7 @@ data class HistoryItem(
     val location: String,    // e.g. "Downloads/MediaSaver"
     val uri: String,         // MediaStore uri of the saved file
     val sourceUrl: String,
+    val artworkUrl: String? = null,
 )
 
 fun formatSize(b: Long): String =
@@ -108,6 +109,7 @@ object HistoryStore {
                     location = o.optString("location"),
                     uri = o.optString("uri"),
                     sourceUrl = o.optString("url"),
+                    artworkUrl = o.optString("artwork").takeIf { it.startsWith("http") },
                 )
             }
         } catch (_: Exception) {
@@ -180,7 +182,8 @@ object HistoryStore {
                     JSONObject()
                         .put("name", it.name).put("format", it.format).put("quality", it.quality)
                         .put("size", it.sizeBytes).put("time", it.timeMillis)
-                        .put("location", it.location).put("uri", it.uri).put("url", it.sourceUrl),
+                        .put("location", it.location).put("uri", it.uri).put("url", it.sourceUrl)
+                        .put("artwork", it.artworkUrl.orEmpty()),
                 )
             }
             f.writeText(arr.toString())
