@@ -846,8 +846,8 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
         if (q.isEmpty()) return
         feedJob?.cancel()
         previewJob?.cancel()
+        recommendationJob?.cancel()
         val link = parseLinks(q).firstOrNull()
-        if (link == null) refreshRecommendations(q)
         val limit = _searchLimit.value
         val sites = if (link != null) listOf(LINK_SITE) else SEARCH_SITES.map { it.label }
         _feed.update {
@@ -894,6 +894,7 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
                     )
                 }
             }
+            if (link == null) refreshRecommendations(q)
         }
     }
 
@@ -1267,6 +1268,7 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
     /** Hands links to the download service. Works while another download is running: they join the queue. */
     private fun startDownload(ready: List<PendingLink>): Boolean {
         if (ready.isEmpty()) return false
+        recommendationJob?.cancel()
         val wasWorking = state.value.phase == Phase.Working
         if (!wasWorking) DownloadEngine.markStarting() // blocks double taps until the service takes over
         try {

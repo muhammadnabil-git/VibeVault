@@ -21,6 +21,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
@@ -166,23 +167,34 @@ object FeedLoader {
      * Null = the website failed or timed out (the other websites are not affected).
      */
     suspend fun searchSiteTimed(spec: SiteSpec, query: String, limit: Int): List<FeedItem>? {
+        val processId = if (spec.prefix != null) "feed-search-${UUID.randomUUID()}" else null
         val job = searchScope.async {
             try {
-                searchSite(spec, query, limit)
+                searchSite(spec, query, limit, processId)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
                 null
             }
         }
-        val res = withTimeoutOrNull(timeoutMs(spec)) { job.await() }
-        if (res == null) job.cancel()
-        return res
+        return try {
+            withTimeoutOrNull(timeoutMs(spec)) { job.await() }
+        } finally {
+            if (!job.isCompleted) {
+                job.cancel()
+                processId?.let { YoutubeDL.getInstance().destroyProcessById(it) }
+            }
+        }
     }
 
     /** Blocking: one website's results for a video name. */
-    fun searchSite(spec: SiteSpec, query: String, limit: Int = DEFAULT_SEARCH_LIMIT): List<FeedItem> = when {
-        spec.prefix != null -> engineSearch(spec, query, limit)
+    fun searchSite(
+        spec: SiteSpec,
+        query: String,
+        limit: Int = DEFAULT_SEARCH_LIMIT,
+        processId: String? = null,
+    ): List<FeedItem> = when {
+        spec.prefix != null -> engineSearch(spec, query, limit, processId)
         spec.label == "Dailymotion" ->
             try { dailymotionSearch(query, limit) } catch (_: Exception) { webSearch(spec, query, limit) }
         spec.label == "Mixcloud" ->
@@ -279,13 +291,13 @@ object FeedLoader {
         return items.distinctBy { it.url }
     }
 
-    private fun engineSearch(spec: SiteSpec, query: String, limit: Int): List<FeedItem> {
+    private fun engineSearch(spec: SiteSpec, query: String, limit: Int, processId: String?): List<FeedItem> {
         val req = YoutubeDLRequest("${spec.prefix}$limit:$query").apply {
             addOption("--flat-playlist")
             addOption("--socket-timeout", "10")
             addOption("--print", "%(id)s|||%(title)s|||%(channel,uploader)s|||%(duration)s|||%(webpage_url,url)s|||%(thumbnail)s")
         }
-        val out: String = YoutubeDL.getInstance().execute(req, null, null).out ?: ""
+        val out: String = YoutubeDL.getInstance().execute(req, processId, null).out ?: ""
         val items = mutableListOf<FeedItem>()
         for (line in out.lines()) {
             val parts = line.split("|||")
