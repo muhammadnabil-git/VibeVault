@@ -702,7 +702,7 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
     private suspend fun searchRecommendationMusic(queries: List<String>, region: String): List<List<FeedItem>?> =
         coroutineScope {
             queries.map { query ->
-                async { PlatformLinks.youtubeMusicSearch(query, 5, region) }
+                async { LinkResolver.youtubeMusicSearch(query, 5, region) }
             }.map { it.await() }
         }
 
