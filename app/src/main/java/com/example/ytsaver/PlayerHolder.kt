@@ -2,6 +2,7 @@ package com.example.ytsaver
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -18,6 +19,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.ByteArrayOutputStream
 
 fun prettyName(name: String): String = name.substringBeforeLast('.').replace('_', ' ')
 
@@ -144,6 +146,31 @@ object PlayerHolder {
     }
 
     fun peek(): ExoPlayer? = player
+
+    fun updateArtwork(item: HistoryItem, bitmap: Bitmap) {
+        val p = player ?: return
+        if (android.os.Looper.myLooper() != p.applicationLooper) {
+            main.post { updateArtwork(item, bitmap) }
+            return
+        }
+        val index = _entries.value.indexOfFirst { it.uri == item.uri }
+        if (index !in 0 until p.mediaItemCount) return
+        val mediaItem = p.getMediaItemAt(index)
+        if (mediaItem.mediaMetadata.artworkData != null) return
+        if (item.location == "radio" && mediaItem.mediaMetadata.artworkUri != null) return
+
+        val bytes = ByteArrayOutputStream().use { output ->
+            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)) return
+            output.toByteArray()
+        }
+        val metadata = mediaItem.mediaMetadata.buildUpon()
+            .setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+            .build()
+        val isCurrent = index == p.currentMediaItemIndex
+        val position = if (isCurrent) p.currentPosition else 0L
+        p.replaceMediaItem(index, mediaItem.buildUpon().setMediaMetadata(metadata).build())
+        if (isCurrent) p.seekTo(index, position)
+    }
 
     private val MEDIA_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
         .setUsage(C.USAGE_MEDIA)

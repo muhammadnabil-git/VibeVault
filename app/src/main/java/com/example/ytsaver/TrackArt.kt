@@ -420,7 +420,9 @@ object TrackArt {
 fun TrackArtImage(item: HistoryItem, modifier: Modifier = Modifier, iconSize: Dp) {
     val ctx = LocalContext.current
     val bmp by produceState<Bitmap?>(null, item.uri, item.artworkUrl) {
-        value = withContext(Dispatchers.IO) { TrackArt.load(ctx, item) }
+        val loaded = withContext(Dispatchers.IO) { TrackArt.load(ctx, item) }
+        value = loaded
+        loaded?.let { PlayerHolder.updateArtwork(item, it) }
     }
     val cs = MaterialTheme.colorScheme
     Box(
