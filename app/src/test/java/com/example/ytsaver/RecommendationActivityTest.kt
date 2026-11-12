@@ -1,9 +1,40 @@
 package com.example.ytsaver
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RecommendationActivityTest {
+    @Test
+    fun regionalVideoRecommendationsLeadAndOutnumberPersonalizedResults() {
+        val regional = (1..9).map { recommendation("regional-$it", "regional") }
+        val personalized = (1..3).map { recommendation("personalized-$it", "personalized") }
+
+        val ranked = prioritizeRegionalRecommendations(regional, personalized)
+
+        assertEquals(
+            listOf(
+                "regional-1", "regional-2", "regional-3", "personalized-1",
+                "regional-4", "regional-5", "regional-6", "personalized-2",
+                "regional-7", "regional-8", "regional-9", "personalized-3",
+            ),
+            ranked.map { it.title },
+        )
+    }
+
+    @Test
+    fun regionalVideoRecommendationsDeduplicateByVideo() {
+        val regional = listOf(recommendation("abcdefghijk", "regional"))
+        val personalized = listOf(
+            FeedItem("https://youtu.be/abcdefghijk?feature=shared", "duplicate", "", 0L, null),
+            recommendation("personalized-1", "personalized"),
+        )
+
+        val ranked = prioritizeRegionalRecommendations(regional, personalized)
+
+        assertEquals(listOf("abcdefghijk", "personalized-1"), ranked.map { it.title })
+    }
+
     @Test
     fun combinesSearchesPlayedFilesAndSavedFiles() {
         val savedAudio = audio("Downloaded Artist - Downloaded Song.mp3", "saved-audio")
@@ -35,4 +66,7 @@ class RecommendationActivityTest {
     private fun audio(name: String, uri: String) = HistoryItem(name, "MP3", 0, 0, 1, "", uri, "")
 
     private fun video(name: String, uri: String) = HistoryItem(name, "MP4", 0, 0, 1, "", uri, "")
+
+    private fun recommendation(id: String, site: String) =
+        FeedItem("https://www.youtube.com/watch?v=$id", id, "", 0L, null, site = site)
 }

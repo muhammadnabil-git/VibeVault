@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11111b">
+  <title>VibeVault Recovery</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #11111b;
+      color: #f4f1ff;
+    }
+
+    body {
+      box-sizing: border-box;
+      display: grid;
+      min-height: 100vh;
+      margin: 0;
+      padding: 24px;
+      place-items: center;
+    }
+
+    main {
+      width: min(100%, 520px);
+      padding: 32px;
+      border: 1px solid #343044;
+      border-radius: 24px;
+      background: #1b1926;
+      box-shadow: 0 20px 60px #0005;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      color: #b7a4ff;
+      font-size: clamp(1.7rem, 6vw, 2.2rem);
+    }
+
+    p {
+      color: #d3cede;
+      line-height: 1.65;
+    }
+
+    .note {
+      margin-top: 24px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: #292536;
+      color: #bdb6cb;
+      font-size: 0.94rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>VibeVault recovery</h1>
+    <p>This page is used as a fallback for VibeVault’s secure email sign-in links.</p>
+    <p>To finish recovery, open the email link on the same Android device where you requested it. The link should open VibeVault so you can set your new vault PIN.</p>
+    <p class="note">If you reached this page instead of the app, return to VibeVault and check that the app is installed and its Firebase App Links are verified.</p>
+  </main>
+</body>
+</html>

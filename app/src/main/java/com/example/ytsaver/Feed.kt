@@ -95,6 +95,43 @@ fun interleaveRecommendationResults(results: List<List<FeedItem>>, limit: Int = 
     return out.take(limit)
 }
 
+/** Keeps regional picks in three of every four positions, using personal activity to add variety. */
+fun prioritizeRegionalRecommendations(
+    regional: List<FeedItem>,
+    personalized: List<FeedItem>,
+    limit: Int = 12,
+    regionalPerPersonalized: Int = 3,
+): List<FeedItem> {
+    val out = mutableListOf<FeedItem>()
+    val seen = mutableSetOf<String>()
+    var regionalIndex = 0
+    var personalizedIndex = 0
+
+    fun appendNext(items: List<FeedItem>, index: Int): Int {
+        var next = index
+        while (next < items.size) {
+            val item = items[next++]
+            if (seen.add(sourceId(item.url))) {
+                out += item
+                break
+            }
+        }
+        return next
+    }
+
+    while (out.size < limit && (regionalIndex < regional.size || personalizedIndex < personalized.size)) {
+        repeat(regionalPerPersonalized.coerceAtLeast(1)) {
+            if (out.size < limit && regionalIndex < regional.size) {
+                regionalIndex = appendNext(regional, regionalIndex)
+            }
+        }
+        if (out.size < limit && personalizedIndex < personalized.size) {
+            personalizedIndex = appendNext(personalized, personalizedIndex)
+        }
+    }
+    return out
+}
+
 object FeedLoader {
     private const val WEB_UA =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"

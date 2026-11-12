@@ -529,7 +529,11 @@ fun BrowserScreen(vm: DownloaderViewModel, startUrl: String, onClose: () -> Unit
                                 else if (sp.previewUrl != null && hostOf(current).contains("shazam.")) songChoice = sp
                                 else { vm.sendSongToDownload(sp.query); onClose() }
                             }
-                        } else { vm.sendToDownload(current); onClose() }
+                        } else {
+                            val downloadUrl = LinkResolver.youtubeVideoUrlFromMusic(current) ?: current
+                            vm.sendToDownload(downloadUrl)
+                            onClose()
+                        }
                     },
                     enabled = current.startsWith("http") && !songBusy,
                     shape = RoundedCornerShape(10.dp),

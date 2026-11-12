@@ -44,7 +44,7 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * The picture of a saved file.
  *  - video: a frame of the video;
- *  - audio: the embedded cover; then matching Deezer or Apple Music artwork and a Deezer artist photo; finally the branded tile.
+ *  - audio: the embedded cover; then matching online album art and artist imagery; finally the branded tile.
  * The online lookups can be switched off in Settings -> Behavior ("Artist pictures").
  */
 object TrackArt {
@@ -52,7 +52,7 @@ object TrackArt {
     private val noArt = ConcurrentHashMap<String, Long>()
     private val trackCoverUrls = ConcurrentHashMap<String, List<String>>()
     private val artistCoverUrls = ConcurrentHashMap<String, String>()
-    private const val MISS_RETRY_MS = 6 * 60 * 60_000L
+    private const val MISS_RETRY_MS = 30 * 60_000L
     private val quranTerms = Regex("""(?i)(?<![a-z0-9])(qur['’]?an|surah?|recitation|tilawah|tilawat|qari|ayat|ayah)(?![a-z0-9])""")
     private val arabicQuranTerms = Regex("القرآن|قرآن|تلاوة|ترتيل|سورة|سوره|آيات|آية|المصحف")
     @Volatile private var standardQuranCover: Bitmap? = null
@@ -99,10 +99,20 @@ object TrackArt {
         if (isQuranRecitation(item.name, item.sourceUrl, tagTitle, tagAlbum, tagArtist)) return quranCover(ctx)
         embedded?.let { decode(it)?.let { cover -> return cover } }
         if (!enabled(ctx)) return null
-        val artist = tagArtist ?: artistFromName(item.name)
-        val title = tagTitle ?: titleFromName(item.name)
-        if (title.isNotBlank()) trackPicture(ctx, artist, title)?.let { return it }
-        return artist?.let { artistPicture(ctx, it) }
+        val artists = listOfNotNull(tagArtist, artistFromName(item.name))
+            .map(LastFm::cleanArtist)
+            .filter(String::isNotBlank)
+            .distinct()
+        val titles = listOfNotNull(tagTitle, titleFromName(item.name))
+            .map(::cleanTrackTitle)
+            .filter(String::isNotBlank)
+            .distinct()
+        for (title in titles) {
+            artists.forEach { artist -> trackPicture(ctx, artist, title)?.let { return it } }
+            trackPicture(ctx, null, title)?.let { return it }
+        }
+        artists.forEach { artist -> artistPicture(ctx, artist)?.let { return it } }
+        return null
     }
 
     private fun videoArt(ctx: Context, item: HistoryItem): Bitmap? {
@@ -133,9 +143,9 @@ object TrackArt {
 
     fun findArtistCoverUrl(artist: String): String? {
         val k = key(artist)
-        artistCoverUrls[k]?.let { return it.takeIf { url -> url.isNotBlank() } }
-        val url = fetchArtistUrl(artist)
-        artistCoverUrls[k] = url.orEmpty()
+        artistCoverUrls[k]?.let { return it }
+        val url = fetchArtistUrl(artist) ?: youtubeMusicArtistCoverUrl(artist)
+        if (url != null) artistCoverUrls[k] = url
         return url
     }
 
@@ -157,15 +167,7 @@ object TrackArt {
         val cleanedTitle = cleanTrackTitle(title)
         if (cleanedTitle.isBlank()) return null
         val cleanedArtist = artist?.let(LastFm::cleanArtist)?.takeIf { it.isNotBlank() }
-        val key = "${region.uppercase(Locale.ROOT)}:${norm(cleanedArtist.orEmpty())}:${norm(cleanedTitle)}"
-        val urls = trackCoverUrls[key] ?: run {
-            val found = listOfNotNull(
-                deezerTrackCoverUrl(cleanedArtist, cleanedTitle),
-                appleTrackCoverUrl(cleanedArtist, cleanedTitle, region),
-            ).distinct()
-            trackCoverUrls[key] = found
-            found
-        }
+        val urls = findTrackCoverUrls(cleanedTitle, cleanedArtist, region)
         return urls.firstOrNull() ?: cleanedArtist?.let(::findArtistCoverUrl)
     }
 
@@ -184,29 +186,36 @@ object TrackArt {
     private fun key(artist: String): String =
         MessageDigest.getInstance("SHA-1").digest(artist.lowercase().trim().toByteArray()).joinToString("") { "%02x".format(it) }
 
+    private fun artFile(ctx: Context, kind: String, name: String): File =
+        File(File(ctx.filesDir, "artwork/$kind").apply { mkdirs() }, name)
+
+    private fun persistArtwork(file: File, bitmap: Bitmap) {
+        runCatching {
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+        }
+    }
+
     private fun artistPicture(ctx: Context, artist: String): Bitmap? {
-        val dir = File(ctx.cacheDir, "artist_art").apply { mkdirs() }
         val k = key(artist)
-        val img = File(dir, "$k.jpg")
-        val none = File(dir, "$k.none")
+        val img = artFile(ctx, "artist_art", "$k.jpg")
+        val none = artFile(ctx, "artist_art", "$k.none")
         if (img.isFile) return runCatching { BitmapFactory.decodeFile(img.path) }.getOrNull()
-        // a failed lookup is not repeated for a week (offline, unknown artist)
-        if (none.isFile && System.currentTimeMillis() - none.lastModified() < 7 * 24 * 3600_000L) return null
+        if (none.isFile && System.currentTimeMillis() - none.lastModified() < MISS_RETRY_MS) return null
         return try {
             val url = findArtistCoverUrl(artist)
             if (url == null) { none.writeText("x"); return null }
             val bytes = download(url) ?: return null
             img.writeBytes(bytes)
+            none.delete()
             decode(bytes)
         } catch (_: Exception) {
             null       // offline: tried again next time
         }
     }
 
-    /** A track result is used only when Deezer reports the exact same artist. */
+    /** Looks up public catalogues in order and persists the first matching cover that can be downloaded. */
     private fun trackPicture(ctx: Context, artist: String?, title: String): Bitmap? {
-        val dir = File(ctx.cacheDir, "track_art").apply { mkdirs() }
-        val img = File(dir, "${key("${artist.orEmpty()} $title")}.jpg")
+        val img = artFile(ctx, "track_art", "${key("${artist.orEmpty()} $title")}.jpg")
         if (img.isFile) {
             runCatching { BitmapFactory.decodeFile(img.path) }.getOrNull()?.let { return it }
             img.delete()
@@ -217,6 +226,13 @@ object TrackArt {
             img.writeBytes(art)
             return bitmap
         }
+        val catalogArt = artist?.takeIf(String::isNotBlank)?.let { name ->
+            runCatching { MusicDetector.enrich(TrackMatch(title, name, "artwork lookup")).cover }.getOrNull()
+        }
+        if (catalogArt != null) {
+            persistArtwork(img, catalogArt)
+            return catalogArt
+        }
         return null
     }
 
@@ -225,14 +241,40 @@ object TrackArt {
         val cleanedArtist = artist?.let(LastFm::cleanArtist)?.takeIf { it.isNotBlank() }
         if (cleanedTitle.isBlank()) return emptyList()
         val cacheKey = "${region.uppercase(Locale.ROOT)}:${norm(cleanedArtist.orEmpty())}:${norm(cleanedTitle)}"
-        return trackCoverUrls[cacheKey] ?: run {
-            val found = listOfNotNull(
-                deezerTrackCoverUrl(cleanedArtist, cleanedTitle),
-                appleTrackCoverUrl(cleanedArtist, cleanedTitle, region),
-            ).distinct()
-            trackCoverUrls[cacheKey] = found
-            found
-        }
+        trackCoverUrls[cacheKey]?.let { return it }
+        val found = listOfNotNull(
+            deezerTrackCoverUrl(cleanedArtist, cleanedTitle)
+                ?: appleTrackCoverUrl(cleanedArtist, cleanedTitle, region)
+                ?: cleanedArtist?.let { lastFmTrackCoverUrl(it, cleanedTitle) }
+                ?: youtubeMusicTrackCoverUrl(cleanedArtist, cleanedTitle, region),
+        )
+        if (found.isNotEmpty()) trackCoverUrls.putIfAbsent(cacheKey, found)
+        return found
+    }
+
+    private fun lastFmTrackCoverUrl(artist: String, title: String): String? =
+        runCatching { LastFm.trackInfo(artist, title)?.imageUrl }.getOrNull()
+
+    private fun youtubeMusicTrackCoverUrl(artist: String?, title: String, region: String): String? {
+        val items = runCatching {
+            LinkResolver.youtubeMusicSearch(listOfNotNull(artist, title).joinToString(" "), 10, region)
+        }.getOrNull().orEmpty()
+        val wantedTitle = norm(cleanTrackTitle(title))
+        val wantedArtist = norm(LastFm.cleanArtist(artist.orEmpty()))
+        return items.firstOrNull { item ->
+            titleMatches(wantedTitle, norm(cleanTrackTitle(item.title))) &&
+                (wantedArtist.isBlank() || artistMatches(wantedArtist, norm(LastFm.cleanArtist(item.uploader))))
+        }?.thumbUrl
+    }
+
+    private fun youtubeMusicArtistCoverUrl(artist: String): String? {
+        val items = runCatching {
+            LinkResolver.youtubeMusicSearch(artist, 10, Locale.getDefault().country)
+        }.getOrNull().orEmpty()
+        val wantedArtist = norm(LastFm.cleanArtist(artist))
+        return items.firstOrNull {
+            artistMatches(wantedArtist, norm(LastFm.cleanArtist(it.uploader)))
+        }?.thumbUrl
     }
 
     private fun deezerTrackCoverUrl(artist: String?, title: String): String? {

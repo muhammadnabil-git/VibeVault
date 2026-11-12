@@ -626,7 +626,6 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
         val musicTrendingQuery = "Trending songs in $country"
         val videoTrendingQuery = "Trending videos in $country"
         val musicQueries = if (musicTopics.isEmpty()) listOf(musicTrendingQuery) else musicTopics.map { "$it songs" }
-        val videoQueries = if (videoTopics.isEmpty()) listOf(videoTrendingQuery) else videoTopics
         val musicFallback = FeedItem(
             url = "https://music.youtube.com/charts?gl=$region",
             title = "Trending music in $country",
@@ -651,27 +650,27 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
         recommendationJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 withTimeoutOrNull(20_000L) { DownloadEngine.state.first { it.engineReady } }
-                val (musicResults, videoResults) = coroutineScope {
+                val (musicResults, regionalVideoResults, personalizedVideoResults) = coroutineScope {
                     val music = async { searchRecommendationMusic(musicQueries, region) }
-                    val videos = async { searchRecommendationVideos(videoQueries, youtube) }
-                    music.await() to videos.await()
+                    val regionalVideos = async { searchRecommendationVideos(listOf(videoTrendingQuery), youtube, limit = 9) }
+                    val personalizedVideos = async { searchRecommendationVideos(videoTopics, youtube) }
+                    Triple(music.await(), regionalVideos.await(), personalizedVideos.await())
                 }
                 var music = interleaveRecommendationResults(musicResults.filterNotNull())
                     .filter { hostOf(it.url).contains("music.youtube.com") }
                     .map { it.copy(site = "YouTube Music", isAudio = true) }
-                var videos = interleaveRecommendationResults(videoResults.filterNotNull())
+                val regionalVideos = interleaveRecommendationResults(regionalVideoResults.filterNotNull())
                     .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
                     .map { it.copy(site = "YouTube", isAudio = false) }
+                val personalizedVideos = interleaveRecommendationResults(personalizedVideoResults.filterNotNull())
+                    .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
+                    .map { it.copy(site = "YouTube", isAudio = false) }
+                val videos = prioritizeRegionalRecommendations(regionalVideos, personalizedVideos)
 
                 if (music.isEmpty() && musicQueries != listOf(musicTrendingQuery)) {
                     music = interleaveRecommendationResults(searchRecommendationMusic(listOf(musicTrendingQuery), region).filterNotNull())
                         .filter { hostOf(it.url).contains("music.youtube.com") }
                         .map { it.copy(site = "YouTube Music", isAudio = true) }
-                }
-                if (videos.isEmpty() && videoQueries != listOf(videoTrendingQuery)) {
-                    videos = interleaveRecommendationResults(searchRecommendationVideos(listOf(videoTrendingQuery), youtube).filterNotNull())
-                        .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
-                        .map { it.copy(site = "YouTube", isAudio = false) }
                 }
 
                 _recommendations.update { current ->
@@ -706,10 +705,14 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
             }.map { it.await() }
         }
 
-    private suspend fun searchRecommendationVideos(queries: List<String>, site: SiteSpec): List<List<FeedItem>?> =
+    private suspend fun searchRecommendationVideos(
+        queries: List<String>,
+        site: SiteSpec,
+        limit: Int = 5,
+    ): List<List<FeedItem>?> =
         coroutineScope {
             queries.map { query ->
-                async { FeedLoader.searchSiteTimed(site, query, 5) }
+                async { FeedLoader.searchSiteTimed(site, query, limit) }
             }.map { it.await() }
         }
 

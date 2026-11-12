@@ -2,6 +2,7 @@ package com.example.ytsaver
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -16,6 +17,15 @@ class FormatAndShareTest {
     @Test fun sourceIdIgnoresTrackingParameters() {
         assertEquals("abcdefghijk", sourceId("https://youtu.be/abcdefghijk?si=xyz"))
         assertEquals("abcdefghijk", sourceId("https://www.youtube.com/watch?v=abcdefghijk&list=1"))
+    }
+
+    @Test fun youtubeMusicDownloadsUseTheEquivalentYoutubeVideo() {
+        assertEquals(
+            "https://www.youtube.com/watch?v=abcdefghijk",
+            LinkResolver.youtubeVideoUrlFromMusic("https://music.youtube.com/watch?v=abcdefghijk&list=RDabcdefghijk"),
+        )
+        assertNull(LinkResolver.youtubeVideoUrlFromMusic("https://www.youtube.com/watch?v=abcdefghijk"))
+        assertNull(LinkResolver.youtubeVideoUrlFromMusic("https://music.youtube.com/channel/UC123"))
     }
 
     @Test fun shareTextHasTitlesAndLinksButNeverLocalPaths() {

@@ -191,6 +191,12 @@ object LinkResolver {
         return "https://music.youtube.com/watch?v=$id"
     }
 
+    fun youtubeVideoUrlFromMusic(u: String): String? {
+        if (hostOf(u) != "music.youtube.com") return null
+        val id = Regex("""[?&]v=([A-Za-z0-9_-]{11})""").find(u)?.groupValues?.get(1) ?: return null
+        return "https://www.youtube.com/watch?v=$id"
+    }
+
     private fun youtubeFromMusic(u: String) = u.replace("://music.youtube.com/", "://www.youtube.com/")
 
     /** Why the last Odesli attempt failed (HTTP code, -1 = network/parse error, 0 = nothing came back), shown in the note. */

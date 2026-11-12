@@ -280,8 +280,8 @@ fun SettingsScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                 var artistArt by remember { mutableStateOf(TrackArt.enabled(ctx)) }
                 BehaviorSwitchRow(
                     tr("Artist and album covers", "صور الفنانين والألبومات"),
-                    tr("When a track has no embedded cover, look up matching album artwork from Deezer or Apple Music, then the artist photo on Deezer. Turn this off to keep only embedded artwork.",
-                        "عند غياب غلاف داخل الملف، يُبحث عن غلاف ألبوم مطابق عبر Deezer أو Apple Music، ثم صورة الفنان عبر Deezer. أوقف هذا الخيار للاكتفاء بالغلاف المضمّن."),
+                    tr("When a track has no embedded cover, search Deezer, Apple Music, Last.fm, MusicBrainz and YouTube Music. Found artwork is saved on this device. Turn this off to skip online lookups.",
+                        "عند غياب غلاف داخل الملف، يُبحث عبر Deezer وApple Music وLast.fm وMusicBrainz وYouTube Music. تُحفظ الأغلفة التي يتم العثور عليها على هذا الجهاز. أوقف هذا الخيار لتعطيل البحث عبر الإنترنت."),
                     artistArt,
                 ) {
                     artistArt = it
@@ -854,11 +854,15 @@ private fun LivePicturesCard() {
     val source by LiveWallpaper.source.collectAsStateWithLifecycle()
     val every by LiveWallpaper.every.collectAsStateWithLifecycle()
     val dim by LiveWallpaper.dim.collectAsStateWithLifecycle()
+    val bitmap by LiveWallpaper.bitmap.collectAsStateWithLifecycle()
     val busy by LiveWallpaper.busy.collectAsStateWithLifecycle()
     val credit by LiveWallpaper.credit.collectAsStateWithLifecycle()
     val error by LiveWallpaper.error.collectAsStateWithLifecycle()
     remember { LiveWallpaper.init(ctx) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { u -> if (u != null) LiveWallpaper.importPicture(ctx, u) }
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/jpeg")) { u ->
+        if (u != null) LiveWallpaper.exportPicture(ctx, u)
+    }
     CollapsibleCard(tr("Live pictures", "صور حيّة")) {
         Text(
             tr("A picture from the internet that changes by itself shows behind the app. No account is needed.",
@@ -909,6 +913,14 @@ private fun LivePicturesCard() {
                     Text(tr("Import", "استيراد"))
                 }
                 if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            }
+            OutlinedButton(
+                onClick = { export.launch("VibeVault-live-picture.jpg") },
+                enabled = bitmap != null && !busy,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(tr("Export current picture", "تصدير الصورة الحالية"))
             }
             if (credit.isNotBlank()) Text(tr("Now: $credit", "الآن: $credit"), color = Muted, fontSize = 12.sp, maxLines = 2)
             if (error.isNotBlank()) Text(tr("Couldn't update: $error", "تعذّر التحديث: $error"), color = Amber, fontSize = 12.sp)
