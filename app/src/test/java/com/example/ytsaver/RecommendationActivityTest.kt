@@ -1,10 +1,17 @@
 package com.example.ytsaver
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RecommendationActivityTest {
+    @Test
+    fun regionalVideoCandidatesRequireArabicMetadata() {
+        assertTrue(RecommendationActivity.hasArabicMetadata(recommendation("abcdefghijk", "أخبار مصر")))
+        assertFalse(RecommendationActivity.hasArabicMetadata(recommendation("lmnopqrstuv", "Global News")))
+    }
+
     @Test
     fun regionalVideoRecommendationsLeadAndOutnumberPersonalizedResults() {
         val regional = (1..9).map { recommendation("regional-$it", "regional") }
@@ -61,6 +68,10 @@ class RecommendationActivityTest {
         assertTrue(videoTopics.contains("Searched Topic"))
         assertTrue(videoTopics.contains("Played Channel - Clip"))
         assertTrue(videoTopics.contains("Downloaded Channel - Video"))
+        assertEquals(
+            listOf("Played Channel - Clip", "Downloaded Channel - Video", "Searched Topic"),
+            videoTopics.take(3),
+        )
     }
 
     private fun audio(name: String, uri: String) = HistoryItem(name, "MP3", 0, 0, 1, "", uri, "")

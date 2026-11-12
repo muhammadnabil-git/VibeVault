@@ -624,7 +624,14 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
         val region = Locale.getDefault().country.takeIf { it.matches(Regex("[A-Za-z]{2}")) }?.uppercase(Locale.ROOT) ?: "US"
         val country = Locale("", region).getDisplayCountry(Locale.ENGLISH).ifBlank { region }
         val musicTrendingQuery = "Trending songs in $country"
-        val videoTrendingQuery = "Trending videos in $country"
+        val videoRegion = "EG"
+        val videoTrendingQueries = listOf(
+            "ترند مصر اليوم",
+            "الفيديوهات الرائجة في مصر",
+            "ترند الشرق الأوسط",
+            "الفيديوهات الرائجة في العالم العربي",
+        )
+        val personalizedVideoQueries = videoTopics.map { "$it مصر عربي" }
         val musicQueries = if (musicTopics.isEmpty()) listOf(musicTrendingQuery) else musicTopics.map { "$it songs" }
         val musicFallback = FeedItem(
             url = "https://music.youtube.com/charts?gl=$region",
@@ -636,8 +643,8 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
             isAudio = true,
         )
         val videoFallback = FeedItem(
-            url = "https://charts.youtube.com/charts/TopVideos/$region",
-            title = "Trending videos in $country",
+            url = "https://charts.youtube.com/charts/TopVideos/$videoRegion",
+            title = L.t("Trending videos in Egypt", "فيديوهات رائجة في مصر"),
             uploader = "YouTube charts",
             durationSec = 0L,
             thumbUrl = null,
@@ -652,8 +659,8 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
                 withTimeoutOrNull(20_000L) { DownloadEngine.state.first { it.engineReady } }
                 val (musicResults, regionalVideoResults, personalizedVideoResults) = coroutineScope {
                     val music = async { searchRecommendationMusic(musicQueries, region) }
-                    val regionalVideos = async { searchRecommendationVideos(listOf(videoTrendingQuery), youtube, limit = 9) }
-                    val personalizedVideos = async { searchRecommendationVideos(videoTopics, youtube) }
+                    val regionalVideos = async { searchRecommendationVideos(videoTrendingQueries, youtube, limit = 5) }
+                    val personalizedVideos = async { searchRecommendationVideos(personalizedVideoQueries, youtube) }
                     Triple(music.await(), regionalVideos.await(), personalizedVideos.await())
                 }
                 var music = interleaveRecommendationResults(musicResults.filterNotNull())
@@ -661,9 +668,11 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
                     .map { it.copy(site = "YouTube Music", isAudio = true) }
                 val regionalVideos = interleaveRecommendationResults(regionalVideoResults.filterNotNull())
                     .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
+                    .filter { RecommendationActivity.hasArabicMetadata(it) }
                     .map { it.copy(site = "YouTube", isAudio = false) }
                 val personalizedVideos = interleaveRecommendationResults(personalizedVideoResults.filterNotNull())
                     .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
+                    .filter { RecommendationActivity.hasArabicMetadata(it) }
                     .map { it.copy(site = "YouTube", isAudio = false) }
                 val videos = prioritizeRegionalRecommendations(regionalVideos, personalizedVideos)
 

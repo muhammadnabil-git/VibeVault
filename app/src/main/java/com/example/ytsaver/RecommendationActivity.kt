@@ -20,6 +20,11 @@ object RecommendationActivity {
         Prefs.putStr(ctx.applicationContext, SEARCH_KEY, JSONArray(updated.take(MAX_SEARCHES)).toString())
     }
 
+    fun hasArabicMetadata(item: FeedItem): Boolean =
+        (item.title + item.uploader).any {
+            it.isLetter() && (it.code in 0x0600..0x06FF || it.code in 0x0750..0x077F || it.code in 0x08A0..0x08FF)
+        }
+
     fun topics(
         searches: List<String>,
         history: List<HistoryItem>,
@@ -36,23 +41,27 @@ object RecommendationActivity {
             return listOfNotNull(artist, title).joinToString(" ").ifBlank { prettyName(item.name) }
         }
 
-        val groups = listOf(
-            searches.map(String::trim).filter(String::isNotBlank),
-            playedUris.mapNotNull(byUri::get).filter { it.format == format }.map(::topic),
-            history.asSequence().filter { it.format == format }
-                .sortedByDescending { it.timeMillis }.map(::topic).toList(),
-        )
+        val searchTopics = searches.map(String::trim).filter(String::isNotBlank)
+        val playedTopics = playedUris.mapNotNull(byUri::get).filter { it.format == format }.map(::topic)
+        val savedTopics = history.asSequence().filter { it.format == format }
+            .sortedByDescending { it.timeMillis }.map(::topic).toList()
+        val groups = if (audio) {
+            listOf(searchTopics, playedTopics, savedTopics)
+        } else {
+            listOf(playedTopics, savedTopics, searchTopics)
+        }
         val results = mutableListOf<String>()
+        val seen = mutableSetOf<String>()
         var index = 0
         while (groups.any { index < it.size } && results.size < limit) {
             groups.forEach { group ->
                 group.getOrNull(index)?.let { value ->
-                    if (value.isNotBlank()) results += value
+                    if (value.isNotBlank() && seen.add(normalize(value))) results += value
                 }
             }
             index++
         }
-        return results.distinctBy(::normalize).take(limit)
+        return results.take(limit)
     }
 
     private fun normalize(value: String) =

@@ -21,7 +21,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -142,7 +146,14 @@ fun HomeTab(vm: DownloaderViewModel) {
             RecommendationRow(
                 items = recommendations.music,
                 loading = recommendations.loading,
-                onClick = vm::openBrowser,
+                onClick = { item ->
+                    val videoUrl = LinkResolver.youtubeVideoUrlFromMusic(item.url)
+                    if (videoUrl != null) vm.playEntries(listOf(item.copy(url = videoUrl).toEntry()))
+                    else toast(ctx, L.t("This recommendation isn't a playable track.", "هذا الاقتراح ليس مقطعًا موسيقيًا قابلاً للتشغيل."))
+                },
+                onDownload = { item ->
+                    LinkResolver.youtubeVideoUrlFromMusic(item.url)?.let { vm.sendToDownload(it, asMp3 = true) }
+                },
             )
         }
 
@@ -151,7 +162,8 @@ fun HomeTab(vm: DownloaderViewModel) {
             RecommendationRow(
                 items = recommendations.videos,
                 loading = recommendations.loading,
-                onClick = vm::openBrowser,
+                onClick = { vm.openBrowser(it.url) },
+                onDownload = {},
             )
         }
 
@@ -243,7 +255,12 @@ private fun sectionName(id: String) = when (id) {
 }
 
 @Composable
-private fun RecommendationRow(items: List<FeedItem>, loading: Boolean, onClick: (String) -> Unit) {
+private fun RecommendationRow(
+    items: List<FeedItem>,
+    loading: Boolean,
+    onClick: (FeedItem) -> Unit,
+    onDownload: (FeedItem) -> Unit,
+) {
     if (items.isEmpty()) {
         Text(
             if (loading) tr("Finding regional picks…", "جارٍ العثور على المقترحات المحلية…")
@@ -255,14 +272,51 @@ private fun RecommendationRow(items: List<FeedItem>, loading: Boolean, onClick: 
     }
     LazyRow(horizontalArrangement = Arrangement.spacedBy(Vv.md)) {
         items(items.take(12), key = { it.url }) { item ->
-            Column(
-                Modifier.width(150.dp).clip(RoundedCornerShape(Vv.rMedium))
-                    .clickable(role = Role.Button) { onClick(item.url) },
-                verticalArrangement = Arrangement.spacedBy(Vv.xs),
-            ) {
-                RecommendationArtwork(item, Modifier.size(width = 150.dp, height = 88.dp).clip(RoundedCornerShape(Vv.rMedium)))
-                Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, fontSize = VvText.body)
-                Text(item.uploader, color = Muted, fontSize = VvText.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            var menuOpen by remember(item.url) { mutableStateOf(false) }
+            var addToPlaylistOpen by remember(item.url) { mutableStateOf(false) }
+            val hasYoutubeMusicTrack = item.isAudio && LinkResolver.youtubeVideoUrlFromMusic(item.url) != null
+            Column(Modifier.width(150.dp), verticalArrangement = Arrangement.spacedBy(Vv.xs)) {
+                Box {
+                    RecommendationArtwork(
+                        item,
+                        Modifier.size(width = 150.dp, height = 88.dp)
+                            .clip(RoundedCornerShape(Vv.rMedium))
+                            .clickable(role = Role.Button) { onClick(item) },
+                    )
+                    if (hasYoutubeMusicTrack) {
+                        Box(Modifier.align(Alignment.TopEnd)) {
+                            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = tr("More options", "خيارات إضافية"))
+                            }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(tr("Add to online playlist", "إضافة إلى قائمة تشغيل عبر الإنترنت")) },
+                                    onClick = {
+                                        menuOpen = false
+                                        addToPlaylistOpen = true
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(tr("Send to download", "إرسال إلى التنزيل")) },
+                                    onClick = {
+                                        menuOpen = false
+                                        onDownload(item)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                Column(Modifier.fillMaxWidth().clickable(role = Role.Button) { onClick(item) }) {
+                    Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, fontSize = VvText.body)
+                    Text(item.uploader, color = Muted, fontSize = VvText.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (addToPlaylistOpen) {
+                AddToPlaylistDialog(
+                    entries = listOf(item.toEntry()),
+                    allowedKinds = setOf(KIND_ONLINE),
+                ) { addToPlaylistOpen = false }
             }
         }
     }
@@ -271,7 +325,7 @@ private fun RecommendationRow(items: List<FeedItem>, loading: Boolean, onClick: 
 @Composable
 private fun RecommendationArtwork(item: FeedItem, modifier: Modifier) {
     val coverUrl by produceState<String?>(item.thumbUrl, item.title, item.uploader, item.url, item.isAudio) {
-        val album = if (item.isAudio) {
+        val album = if (item.isAudio && LinkResolver.youtubeVideoUrlFromMusic(item.url) != null) {
             withContext(Dispatchers.IO) {
                 TrackArt.findCoverUrl(item.title, item.uploader, Locale.getDefault().country)
             }

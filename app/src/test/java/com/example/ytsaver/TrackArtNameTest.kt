@@ -16,4 +16,9 @@ class TrackArtNameTest {
 
     @Test fun noDashMeansNoArtist() =
         assertNull(TrackArt.artistFromName("Just a title.mp3"))
+
+    @Test fun arabicArtistAndTitleAreExtractedFromEmDashFilename() {
+        assertEquals("عمرو دياب", TrackArt.artistFromName("عمرو دياب — تملي معاك.mp3"))
+        assertEquals("تملي معاك", TrackArt.titleFromName("عمرو دياب — تملي معاك.mp3"))
+    }
 }
