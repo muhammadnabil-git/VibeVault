@@ -280,8 +280,8 @@ fun SettingsScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                 var artistArt by remember { mutableStateOf(TrackArt.enabled(ctx)) }
                 BehaviorSwitchRow(
                     tr("Artist and album covers", "صور الفنانين والألبومات"),
-                    tr("When a track has no embedded cover, look up a matching official album cover and then the artist photo on Deezer. Turn this off to keep only embedded artwork.",
-                        "عند غياب غلاف داخل الملف، يُبحث عن غلاف ألبوم مطابق ثم صورة الفنان عبر Deezer. أوقف هذا الخيار للاكتفاء بالغلاف المضمّن."),
+                    tr("When a track has no embedded cover, look up matching album artwork from Deezer or Apple Music, then the artist photo on Deezer. Turn this off to keep only embedded artwork.",
+                        "عند غياب غلاف داخل الملف، يُبحث عن غلاف ألبوم مطابق عبر Deezer أو Apple Music، ثم صورة الفنان عبر Deezer. أوقف هذا الخيار للاكتفاء بالغلاف المضمّن."),
                     artistArt,
                 ) {
                     artistArt = it
@@ -307,17 +307,20 @@ fun SettingsScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
 
             SettingsCard(tr("Recommendations", "التوصيات")) {
                 PreferenceSwitch(
-                    key = "home_recommendations_master",
-                    title = tr("Show recommended music and videos on Home", "عرض الموسيقى والفيديوهات المقترحة في الرئيسية"),
-                    initial = Prefs.homeRecommendations(ctx, "audio") && Prefs.homeRecommendations(ctx, "video"),
-                    onChange = {
-                        Prefs.setHomeRecommendations(ctx, "audio", it)
-                        Prefs.setHomeRecommendations(ctx, "video", it)
-                    },
+                    key = "home_recommendations_audio",
+                    title = tr("Recommended music", "الموسيقى المقترحة"),
+                    initial = Prefs.homeRecommendations(ctx, "audio"),
+                    onChange = { Prefs.setHomeRecommendations(ctx, "audio", it) },
+                )
+                PreferenceSwitch(
+                    key = "home_recommendations_video",
+                    title = tr("Recommended videos", "الفيديوهات المقترحة"),
+                    initial = Prefs.homeRecommendations(ctx, "video"),
+                    onChange = { Prefs.setHomeRecommendations(ctx, "video", it) },
                 )
                 Text(
-                    tr("Music and video sections can still be shown or hidden separately in Customize Home.",
-                        "يمكن إظهار قسمي الموسيقى والفيديو أو إخفاؤهما بشكل منفصل من تخصيص الرئيسية."),
+                    tr("Each section can also be reordered or hidden from Customize Home.",
+                        "يمكن أيضًا ترتيب كل قسم أو إخفاؤه من تخصيص الرئيسية."),
                     color = Muted, fontSize = 12.sp,
                 )
             }

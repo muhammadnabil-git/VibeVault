@@ -8,9 +8,15 @@ import android.net.Uri
 import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -20,7 +26,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -29,16 +37,21 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * The picture of a saved file.
  *  - video: a frame of the video;
- *  - audio: the embedded cover; then a matching Deezer album cover and artist photo; finally the branded tile.
+ *  - audio: the embedded cover; then matching Deezer or Apple Music artwork and a Deezer artist photo; finally the branded tile.
  * The online lookups can be switched off in Settings -> Behavior ("Artist pictures").
  */
 object TrackArt {
     private val mem = LruCache<String, Bitmap>(80)
-    private val noArt = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val noArt = ConcurrentHashMap<String, Long>()
+    private val trackCoverUrls = ConcurrentHashMap<String, List<String>>()
+    private val artistCoverUrls = ConcurrentHashMap<String, String>()
+    private const val MISS_RETRY_MS = 6 * 60 * 60_000L
     private val quranTerms = Regex("""(?i)(?<![a-z0-9])(qur['’]?an|surah?|recitation|tilawah|tilawat|qari|ayat|ayah)(?![a-z0-9])""")
     private val arabicQuranTerms = Regex("القرآن|قرآن|تلاوة|ترتيل|سورة|سوره|آيات|آية|المصحف")
     @Volatile private var standardQuranCover: Bitmap? = null
@@ -48,13 +61,19 @@ object TrackArt {
     /** Blocking: call from a background thread. */
     fun load(ctx: Context, item: HistoryItem): Bitmap? {
         mem.get(item.uri)?.let { return it }
-        if (item.uri in noArt) return null
+        val now = System.currentTimeMillis()
+        if ((noArt[item.uri] ?: 0L) > now) return null
         val bmp = when {
             isQuranRecitation(item.name, item.sourceUrl) -> quranCover(ctx)
             item.format == "MP3" -> audioArt(ctx, item)
-            else -> VideoThumbs.load(ctx, item.uri)
+            else -> videoArt(ctx, item)
         }
-        if (bmp != null) mem.put(item.uri, bmp) else if (item.format == "MP3") noArt.add(item.uri)
+        if (bmp != null) {
+            mem.put(item.uri, bmp)
+            noArt.remove(item.uri)
+        } else {
+            noArt[item.uri] = now + MISS_RETRY_MS
+        }
         return bmp
     }
 
@@ -79,10 +98,22 @@ object TrackArt {
         if (isQuranRecitation(item.name, item.sourceUrl, tagTitle, tagAlbum, tagArtist)) return quranCover(ctx)
         embedded?.let { decode(it)?.let { cover -> return cover } }
         if (!enabled(ctx)) return null
-        val artist = (tagArtist ?: artistFromName(item.name)) ?: return null
-        val title = tagTitle ?: item.name.substringAfter(" - ", "").takeIf { it.isNotBlank() }?.let(::prettyName)
-        if (title != null) trackPicture(ctx, artist, title)?.let { return it }
-        return artistPicture(ctx, artist)
+        val artist = tagArtist ?: artistFromName(item.name)
+        val title = tagTitle ?: titleFromName(item.name)
+        if (title.isNotBlank()) trackPicture(ctx, artist, title)?.let { return it }
+        return artist?.let { artistPicture(ctx, it) }
+    }
+
+    private fun videoArt(ctx: Context, item: HistoryItem): Bitmap? {
+        VideoThumbs.load(ctx, item.uri)?.let { return it }
+        val thumbUrl = youtubeThumbUrl(item.sourceUrl) ?: return null
+        return download(thumbUrl)?.let(::decode)
+    }
+
+    fun youtubeThumbUrl(url: String): String? {
+        val id = Regex("""(?:v=|youtu\.be/|shorts/|embed/|live/)([A-Za-z0-9_-]{11})""")
+            .find(url)?.groupValues?.get(1) ?: return null
+        return "https://i.ytimg.com/vi/$id/hqdefault.jpg"
     }
 
     private fun isQuranRecitation(vararg values: String?): Boolean =
@@ -99,6 +130,14 @@ object TrackArt {
         }
     }
 
+    fun findArtistCoverUrl(artist: String): String? {
+        val k = key(artist)
+        artistCoverUrls[k]?.let { return it.takeIf { url -> url.isNotBlank() } }
+        val url = fetchArtistUrl(artist)
+        artistCoverUrls[k] = url.orEmpty()
+        return url
+    }
+
     /** "Artist - Title.mp3" -> "Artist" (first artist only); null when the name has no such pattern. */
     fun artistFromName(fileName: String): String? {
         val base = prettyName(fileName)
@@ -107,6 +146,30 @@ object TrackArt {
         val first = base.substring(0, i).split(',', '&', ';').first()
         return LastFm.cleanArtist(first).trim().takeIf { it.length in 2..60 }
     }
+
+    fun titleFromName(fileName: String): String {
+        val base = prettyName(fileName)
+        return cleanTrackTitle(base.substringAfter(" - ", base)).ifBlank { base }
+    }
+
+    fun findTrackCoverUrl(title: String, artist: String?, region: String = Locale.getDefault().country): String? {
+        val cleanedTitle = cleanTrackTitle(title)
+        if (cleanedTitle.isBlank()) return null
+        val cleanedArtist = artist?.let(LastFm::cleanArtist)?.takeIf { it.isNotBlank() }
+        val key = "${region.uppercase(Locale.ROOT)}:${norm(cleanedArtist.orEmpty())}:${norm(cleanedTitle)}"
+        val urls = trackCoverUrls[key] ?: run {
+            val found = listOfNotNull(
+                deezerTrackCoverUrl(cleanedArtist, cleanedTitle),
+                appleTrackCoverUrl(cleanedArtist, cleanedTitle, region),
+            ).distinct()
+            trackCoverUrls[key] = found
+            found
+        }
+        return urls.firstOrNull() ?: cleanedArtist?.let(::findArtistCoverUrl)
+    }
+
+    fun findCoverUrl(title: String, artist: String?, region: String = Locale.getDefault().country): String? =
+        findTrackCoverUrl(title, artist, region) ?: artist?.let(::findArtistCoverUrl)
 
     private fun decode(bytes: ByteArray, target: Int = 400): Bitmap? {
         val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -129,7 +192,7 @@ object TrackArt {
         // a failed lookup is not repeated for a week (offline, unknown artist)
         if (none.isFile && System.currentTimeMillis() - none.lastModified() < 7 * 24 * 3600_000L) return null
         return try {
-            val url = fetchArtistUrl(artist)
+            val url = findArtistCoverUrl(artist)
             if (url == null) { none.writeText("x"); return null }
             val bytes = download(url) ?: return null
             img.writeBytes(bytes)
@@ -140,36 +203,97 @@ object TrackArt {
     }
 
     /** A track result is used only when Deezer reports the exact same artist. */
-    private fun trackPicture(ctx: Context, artist: String, title: String): Bitmap? {
+    private fun trackPicture(ctx: Context, artist: String?, title: String): Bitmap? {
         val dir = File(ctx.cacheDir, "track_art").apply { mkdirs() }
-        val img = File(dir, "${key("$artist $title")}.jpg")
+        val img = File(dir, "${key("${artist.orEmpty()} $title")}.jpg")
         if (img.isFile) {
             runCatching { BitmapFactory.decodeFile(img.path) }.getOrNull()?.let { return it }
             img.delete()
         }
+        for (cover in findTrackCoverUrls(title, artist, Locale.getDefault().country)) {
+            val art = download(cover) ?: continue
+            val bitmap = decode(art) ?: continue
+            img.writeBytes(art)
+            return bitmap
+        }
+        return null
+    }
+
+    private fun findTrackCoverUrls(title: String, artist: String?, region: String): List<String> {
+        val cleanedTitle = cleanTrackTitle(title)
+        val cleanedArtist = artist?.let(LastFm::cleanArtist)?.takeIf { it.isNotBlank() }
+        if (cleanedTitle.isBlank()) return emptyList()
+        val cacheKey = "${region.uppercase(Locale.ROOT)}:${norm(cleanedArtist.orEmpty())}:${norm(cleanedTitle)}"
+        return trackCoverUrls[cacheKey] ?: run {
+            val found = listOfNotNull(
+                deezerTrackCoverUrl(cleanedArtist, cleanedTitle),
+                appleTrackCoverUrl(cleanedArtist, cleanedTitle, region),
+            ).distinct()
+            trackCoverUrls[cacheKey] = found
+            found
+        }
+    }
+
+    private fun deezerTrackCoverUrl(artist: String?, title: String): String? {
         return try {
-            val q = URLEncoder.encode("artist:\"$artist\" track:\"$title\"", "UTF-8")
+            val query = listOfNotNull(
+                artist?.takeIf { it.isNotBlank() }?.let { "artist:\"$it\"" },
+                "track:\"$title\"",
+            ).joinToString(" ")
+            val q = URLEncoder.encode(query, "UTF-8")
             val bytes = get("https://api.deezer.com/search/track?q=$q&limit=10", 300_000) ?: return null
             val arr = JSONObject(String(bytes, Charsets.UTF_8)).optJSONArray("data") ?: return null
-            val want = norm(artist)
-            val wantTitle = norm(title)
+            val wantedArtist = norm(artist.orEmpty())
+            val wantedTitle = norm(cleanTrackTitle(title))
             for (i in 0 until arr.length()) {
                 val track = arr.optJSONObject(i) ?: continue
-                if (norm(track.optJSONObject("artist")?.optString("name").orEmpty()) != want) continue
-                val foundTitle = norm(track.optString("title"))
-                if (!foundTitle.contains(wantTitle) && !wantTitle.contains(foundTitle)) continue
+                if (!titleMatches(wantedTitle, norm(cleanTrackTitle(track.optString("title"))))) continue
+                val foundArtist = norm(track.optJSONObject("artist")?.optString("name").orEmpty())
+                if (wantedArtist.isNotBlank() && !artistMatches(wantedArtist, foundArtist)) continue
                 val album = track.optJSONObject("album") ?: continue
                 val cover = album.optString("cover_xl").ifBlank { album.optString("cover_big") }
-                if (!cover.startsWith("https://")) continue
-                val art = download(cover) ?: continue
-                img.writeBytes(art)
-                return decode(art)
+                if (cover.startsWith("https://")) return cover
             }
             null
         } catch (_: Exception) {
             null
         }
     }
+
+    private fun appleTrackCoverUrl(artist: String?, title: String, region: String): String? {
+        return try {
+            val country = region.takeIf { it.matches(Regex("[A-Za-z]{2}")) }?.uppercase(Locale.ROOT) ?: "US"
+            val term = URLEncoder.encode(listOfNotNull(artist, title).joinToString(" "), "UTF-8")
+            val bytes = get("https://itunes.apple.com/search?term=$term&entity=song&limit=15&country=$country", 300_000)
+                ?: return null
+            val arr = JSONObject(String(bytes, Charsets.UTF_8)).optJSONArray("results") ?: return null
+            val wantedArtist = norm(artist.orEmpty())
+            val wantedTitle = norm(cleanTrackTitle(title))
+            for (i in 0 until arr.length()) {
+                val track = arr.optJSONObject(i) ?: continue
+                if (!titleMatches(wantedTitle, norm(cleanTrackTitle(track.optString("trackName"))))) continue
+                val foundArtist = norm(LastFm.cleanArtist(track.optString("artistName")))
+                if (wantedArtist.isNotBlank() && !artistMatches(wantedArtist, foundArtist)) continue
+                val cover = track.optString("artworkUrl100")
+                if (cover.startsWith("https://")) return cover.replace(Regex("\\d+x\\d+bb"), "600x600bb")
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanTrackTitle(value: String): String = LastFm.cleanTitle(value)
+        .replace(Regex("""(?i)\s*[-–—]\s*(official\s*)?(audio|video|lyrics?|visualizer|visualiser)(\s+.*)?$"""), "")
+        .trim()
+
+    private fun titleMatches(wanted: String, found: String): Boolean =
+        wanted.isNotBlank() && found.isNotBlank() &&
+            (wanted == found || (minOf(wanted.length, found.length) >= 5 && (wanted.startsWith(found) || found.startsWith(wanted))))
+
+    private fun artistMatches(wanted: String, found: String): Boolean =
+        wanted.isNotBlank() && found.isNotBlank() &&
+            (wanted == found || (minOf(wanted.length, found.length) >= 4 && (wanted.startsWith(found) || found.startsWith(wanted))))
 
     private fun get(url: String, maxBytes: Int): ByteArray? {
         val c = URL(url).openConnection() as HttpURLConnection
@@ -230,7 +354,82 @@ fun TrackArtImage(item: HistoryItem, modifier: Modifier = Modifier, iconSize: Dp
         if (b != null) {
             Image(b.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         } else {
-            Sym(if (item.format == "MP3") R.drawable.ic_queue_music else R.drawable.ic_play, iconSize, tint = cs.onPrimary)
+            CoverPlaceholder(item.name, item.format == "MP3", iconSize)
         }
+    }
+}
+
+@Composable
+fun RemoteCover(url: String?, title: String, isAudio: Boolean, modifier: Modifier, iconSize: Dp) {
+    val bmp by produceState<Bitmap?>(null, url) {
+        value = url?.let { ThumbCache.get(it) }
+    }
+    Box(
+        modifier.background(
+            Brush.linearGradient(
+                listOf(
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.45f),
+                ),
+            ),
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
+        val image = bmp
+        if (image != null) {
+            Image(image.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        } else {
+            CoverPlaceholder(title, isAudio, iconSize)
+        }
+    }
+}
+
+@Composable
+fun FavoriteCover(entry: PlEntry, modifier: Modifier, iconSize: Dp) {
+    val ctx = LocalContext.current
+    val localUri = entry.localUri
+    if (localUri != null) {
+        TrackArtImage(
+            HistoryItem(
+                name = entry.title,
+                format = if (entry.isAudio) "MP3" else "MP4",
+                quality = 0,
+                sizeBytes = 0,
+                timeMillis = 0,
+                location = "",
+                uri = localUri,
+                sourceUrl = entry.pageUrl,
+            ),
+            modifier,
+            iconSize,
+        )
+    } else {
+        val coverUrl by produceState<String?>(entry.thumbUrl, entry.title, entry.uploader, entry.pageUrl, entry.isAudio) {
+            val external = if (entry.isAudio && TrackArt.enabled(ctx)) {
+                withContext(Dispatchers.IO) {
+                    val artist = entry.uploader.takeIf { it.isNotBlank() } ?: TrackArt.artistFromName(entry.title)
+                    TrackArt.findCoverUrl(TrackArt.titleFromName(entry.title), artist, Locale.getDefault().country)
+                }
+            } else {
+                null
+            }
+            value = external ?: entry.thumbUrl ?: TrackArt.youtubeThumbUrl(entry.pageUrl)
+        }
+        RemoteCover(coverUrl, entry.title, entry.isAudio, modifier, iconSize)
+    }
+}
+
+@Composable
+private fun CoverPlaceholder(title: String, isAudio: Boolean, iconSize: Dp) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        val mark = prettyName(title).trim().firstOrNull()?.uppercaseChar()?.toString()
+            ?: if (isAudio) "♪" else "▶"
+        Text(mark, color = cs.onPrimary, fontSize = (iconSize.value + 8).sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Spacer(Modifier.height(2.dp))
+        Sym(if (isAudio) R.drawable.ic_queue_music else R.drawable.ic_play, iconSize * 0.6f, tint = cs.onPrimary)
     }
 }

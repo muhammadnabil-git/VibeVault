@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -613,54 +614,104 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
      * The only callers are app startup, Search, and successful download completion.
      */
     fun refreshRecommendations(searchQuery: String? = null) {
+        searchQuery?.let { RecommendationActivity.recordSearch(app, it) }
         recommendationJob?.cancel()
-        val saved = HistoryStore.items.value.filterNot { it.isDeviceFile }
-        val latestAudio = saved.filter { it.format == "MP3" }.maxByOrNull { it.timeMillis }
-        val latestVideo = saved.filter { it.format == "MP4" }.maxByOrNull { it.timeMillis }
-        val audioTopic = latestAudio?.let { TrackArt.artistFromName(it.name) ?: prettyName(it.name) }
-        val searchedChannel = _feed.value.siteResults["YouTube"]?.firstOrNull()?.uploader?.takeIf { it.isNotBlank() }
-        val videoTopic = searchQuery?.takeIf { it.isNotBlank() }
-            ?: latestVideo?.let { prettyName(it.name) }
-            ?: searchedChannel
-        val region = Locale.getDefault().country.takeIf { it.isNotBlank() } ?: "Worldwide"
-        val musicQuery = audioTopic?.let { "$it official song" } ?: "YouTube Music trending songs $region"
-        val videoQuery = videoTopic?.let { "$it official music video" } ?: "YouTube trending videos $region"
-        val youtubeMusic = SiteSpec("YouTube Music", "ytsearch", null, true)
+        val saved = HistoryStore.items.value.toList()
+        val searches = RecommendationActivity.searches(app)
+        val played = PlayLog.recent(app, 40)
+        val musicTopics = RecommendationActivity.topics(searches, saved, played, audio = true)
+        val videoTopics = RecommendationActivity.topics(searches, saved, played, audio = false)
+        val region = Locale.getDefault().country.takeIf { it.matches(Regex("[A-Za-z]{2}")) }?.uppercase(Locale.ROOT) ?: "US"
+        val country = Locale("", region).getDisplayCountry(Locale.ENGLISH).ifBlank { region }
+        val musicTrendingQuery = "Trending songs in $country"
+        val videoTrendingQuery = "Trending videos in $country"
+        val musicQueries = if (musicTopics.isEmpty()) listOf(musicTrendingQuery) else musicTopics.map { "$it songs" }
+        val videoQueries = if (videoTopics.isEmpty()) listOf(videoTrendingQuery) else videoTopics
+        val musicFallback = FeedItem(
+            url = "https://music.youtube.com/charts?gl=$region",
+            title = "Trending music in $country",
+            uploader = "YouTube Music charts",
+            durationSec = 0L,
+            thumbUrl = null,
+            site = "YouTube Music",
+            isAudio = true,
+        )
+        val videoFallback = FeedItem(
+            url = "https://charts.youtube.com/charts/TopVideos/$region",
+            title = "Trending videos in $country",
+            uploader = "YouTube charts",
+            durationSec = 0L,
+            thumbUrl = null,
+            site = "YouTube",
+            isAudio = false,
+        )
         val youtube = SiteSpec("YouTube", "ytsearch", null, false)
 
         _recommendations.update { it.copy(loading = true, musicFailed = false, videosFailed = false) }
         recommendationJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                DownloadEngine.state.first { it.engineReady }
+                withTimeoutOrNull(20_000L) { DownloadEngine.state.first { it.engineReady } }
                 val (musicResults, videoResults) = coroutineScope {
-                    val music = async { FeedLoader.searchSiteTimed(youtubeMusic, musicQuery, 12) }
-                    val videos = async { FeedLoader.searchSiteTimed(youtube, videoQuery, 12) }
+                    val music = async { searchRecommendationMusic(musicQueries, region) }
+                    val videos = async { searchRecommendationVideos(videoQueries, youtube) }
                     music.await() to videos.await()
                 }
-                val music = musicResults?.mapNotNull { item ->
-                    val id = sourceId(item.url).takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) } ?: return@mapNotNull null
-                    item.copy(
-                        url = "https://music.youtube.com/watch?v=$id",
-                        site = "YouTube Music",
-                        isAudio = true,
-                    )
+                var music = interleaveRecommendationResults(musicResults.filterNotNull())
+                    .filter { hostOf(it.url).contains("music.youtube.com") }
+                    .map { it.copy(site = "YouTube Music", isAudio = true) }
+                var videos = interleaveRecommendationResults(videoResults.filterNotNull())
+                    .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
+                    .map { it.copy(site = "YouTube", isAudio = false) }
+
+                if (music.isEmpty() && musicQueries != listOf(musicTrendingQuery)) {
+                    music = interleaveRecommendationResults(searchRecommendationMusic(listOf(musicTrendingQuery), region).filterNotNull())
+                        .filter { hostOf(it.url).contains("music.youtube.com") }
+                        .map { it.copy(site = "YouTube Music", isAudio = true) }
                 }
+                if (videos.isEmpty() && videoQueries != listOf(videoTrendingQuery)) {
+                    videos = interleaveRecommendationResults(searchRecommendationVideos(listOf(videoTrendingQuery), youtube).filterNotNull())
+                        .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
+                        .map { it.copy(site = "YouTube", isAudio = false) }
+                }
+
                 _recommendations.update { current ->
                     current.copy(
-                        music = music ?: current.music,
-                        videos = videoResults?.map { it.copy(site = "YouTube", isAudio = false) } ?: current.videos,
-                        musicFailed = musicResults == null,
-                        videosFailed = videoResults == null,
+                        music = music.ifEmpty { current.music.ifEmpty { listOf(musicFallback) } },
+                        videos = videos.ifEmpty { current.videos.ifEmpty { listOf(videoFallback) } },
+                        musicFailed = music.isEmpty(),
+                        videosFailed = videos.isEmpty(),
                         loading = false,
                     )
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
-                _recommendations.update { it.copy(musicFailed = true, videosFailed = true, loading = false) }
+                _recommendations.update {
+                    it.copy(
+                        music = it.music.ifEmpty { listOf(musicFallback) },
+                        videos = it.videos.ifEmpty { listOf(videoFallback) },
+                        musicFailed = true,
+                        videosFailed = true,
+                        loading = false,
+                    )
+                }
             }
         }
     }
+
+    private suspend fun searchRecommendationMusic(queries: List<String>, region: String): List<List<FeedItem>?> =
+        coroutineScope {
+            queries.map { query ->
+                async { PlatformLinks.youtubeMusicSearch(query, 5, region) }
+            }.map { it.await() }
+        }
+
+    private suspend fun searchRecommendationVideos(queries: List<String>, site: SiteSpec): List<List<FeedItem>?> =
+        coroutineScope {
+            queries.map { query ->
+                async { FeedLoader.searchSiteTimed(site, query, 5) }
+            }.map { it.await() }
+        }
 
     fun setFeedQuery(q: String) { _feed.update { it.copy(query = q) } }
 

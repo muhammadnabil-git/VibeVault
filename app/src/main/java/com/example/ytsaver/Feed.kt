@@ -59,7 +59,7 @@ data class HomeRecommendations(
     val videos: List<FeedItem> = emptyList(),
     val musicFailed: Boolean = false,
     val videosFailed: Boolean = false,
-    val loading: Boolean = false,
+    val loading: Boolean = true,
 )
 
 /** A website the Search tab can search. [prefix] = searched by the download engine; otherwise by a web search limited to [webDomain]. */
@@ -79,6 +79,20 @@ fun interleaveResults(results: Map<String, List<FeedItem>>): List<FeedItem> {
         i++
     }
     return out.distinctBy { it.url }
+}
+
+fun interleaveRecommendationResults(results: List<List<FeedItem>>, limit: Int = 12): List<FeedItem> {
+    val out = mutableListOf<FeedItem>()
+    val seen = mutableSetOf<String>()
+    var index = 0
+    while (out.size < limit && results.any { index < it.size }) {
+        results.forEach { list ->
+            val item = list.getOrNull(index) ?: return@forEach
+            if (seen.add(sourceId(item.url))) out += item
+        }
+        index++
+    }
+    return out.take(limit)
 }
 
 object FeedLoader {

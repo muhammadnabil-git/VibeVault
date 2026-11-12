@@ -1067,7 +1067,7 @@ fun FavoritesScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                     ) {
                         Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Box {
-                                RemoteThumb(e.thumbUrl, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)))
+                                FavoriteCover(e, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)), 24.dp)
                                 if (selectMode) Checkbox(checked = picked, onCheckedChange = { selectedKeys = if (picked) selectedKeys - e.key else selectedKeys + e.key }, modifier = Modifier.align(Alignment.TopStart))
                             }
                             Text(e.title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -1103,7 +1103,7 @@ fun FavoritesScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 if (selectMode) Checkbox(checked = picked, onCheckedChange = { toggle() })
-                                RemoteThumb(e.thumbUrl, Modifier.size(width = 96.dp, height = 54.dp).clip(RoundedCornerShape(8.dp)))
+                                FavoriteCover(e, Modifier.size(width = 96.dp, height = 54.dp).clip(RoundedCornerShape(8.dp)), 20.dp)
                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text(e.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     Text(

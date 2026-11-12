@@ -33,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,7 +43,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Calendar
+import java.util.Locale
 
 /** Which sections of the Home dashboard are shown. Stored on the phone; the user can change them with "Customize". */
 object HomePrefs {
@@ -137,7 +141,7 @@ fun HomeTab(vm: DownloaderViewModel) {
             VvSectionHeader(tr("Recommended music", "موسيقى مقترحة"))
             RecommendationRow(
                 items = recommendations.music,
-                emptyMessage = recommendationEmptyMessage(recommendations.musicFailed, recommendations.loading),
+                loading = recommendations.loading,
                 onClick = vm::openBrowser,
             )
         }
@@ -146,7 +150,7 @@ fun HomeTab(vm: DownloaderViewModel) {
             VvSectionHeader(tr("Recommended videos", "فيديوهات مقترحة"))
             RecommendationRow(
                 items = recommendations.videos,
-                emptyMessage = recommendationEmptyMessage(recommendations.videosFailed, recommendations.loading),
+                loading = recommendations.loading,
                 onClick = vm::openBrowser,
             )
         }
@@ -238,16 +242,15 @@ private fun sectionName(id: String) = when (id) {
     else -> L.t("Your library", "مكتبتك")
 }
 
-private fun recommendationEmptyMessage(failed: Boolean, loading: Boolean): String = when {
-    loading -> L.t("Searching for recommendations…", "جارٍ البحث عن توصيات…")
-    failed -> L.t("Recommendations are temporarily unavailable.", "التوصيات غير متاحة مؤقتًا.")
-    else -> L.t("No recommendations found.", "لم يتم العثور على توصيات.")
-}
-
 @Composable
-private fun RecommendationRow(items: List<FeedItem>, emptyMessage: String, onClick: (String) -> Unit) {
+private fun RecommendationRow(items: List<FeedItem>, loading: Boolean, onClick: (String) -> Unit) {
     if (items.isEmpty()) {
-        Text(emptyMessage, color = Muted, fontSize = VvText.caption)
+        Text(
+            if (loading) tr("Finding regional picks…", "جارٍ العثور على المقترحات المحلية…")
+            else tr("Regional picks will appear here.", "ستظهر المقترحات المحلية هنا."),
+            color = Muted,
+            fontSize = VvText.caption,
+        )
         return
     }
     LazyRow(horizontalArrangement = Arrangement.spacedBy(Vv.md)) {
@@ -257,12 +260,27 @@ private fun RecommendationRow(items: List<FeedItem>, emptyMessage: String, onCli
                     .clickable(role = Role.Button) { onClick(item.url) },
                 verticalArrangement = Arrangement.spacedBy(Vv.xs),
             ) {
-                RemoteThumb(item.thumbUrl, Modifier.size(width = 150.dp, height = 88.dp).clip(RoundedCornerShape(Vv.rMedium)))
+                RecommendationArtwork(item, Modifier.size(width = 150.dp, height = 88.dp).clip(RoundedCornerShape(Vv.rMedium)))
                 Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, fontSize = VvText.body)
                 Text(item.uploader, color = Muted, fontSize = VvText.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
+}
+
+@Composable
+private fun RecommendationArtwork(item: FeedItem, modifier: Modifier) {
+    val coverUrl by produceState<String?>(item.thumbUrl, item.title, item.uploader, item.url, item.isAudio) {
+        val album = if (item.isAudio) {
+            withContext(Dispatchers.IO) {
+                TrackArt.findCoverUrl(item.title, item.uploader, Locale.getDefault().country)
+            }
+        } else {
+            null
+        }
+        value = album ?: item.thumbUrl ?: TrackArt.youtubeThumbUrl(item.url)
+    }
+    RemoteCover(coverUrl, item.title, item.isAudio, modifier, iconSize = 30.dp)
 }
 
 
