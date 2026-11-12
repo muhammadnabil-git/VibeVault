@@ -1,0 +1,12 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- two interlocking V shapes ... -->
+    <path android:fillColor="#5B52E0" android:pathData="M26,34 H37 L47,62 L57,34 H68 L52,76 H42 Z" />
+    <group android:translateX="16">
+        <path android:fillColor="#1A9E98" android:pathData="M26,34 H37 L47,62 L57,34 H68 L52,76 H42 Z" />
+    </group>
+    <!-- ... and a sound-wave curve underneath -->
+    <path android:strokeColor="#1A9E98" android:strokeWidth="3.2" android:strokeLineCap="round"
+        android:pathData="M27,86 C36,77 42,95 52,86 S68,77 80,86" />
+</vector>

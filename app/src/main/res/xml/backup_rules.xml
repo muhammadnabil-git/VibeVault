@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- the vault (private files + its index) is never put in Android backups -->
+<full-backup-content>
+    <exclude domain="file" path="vault" />
+    <exclude domain="file" path="vault.json" />
+</full-backup-content>

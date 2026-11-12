@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VibeVault</string>
+    <string name="widget_description">Control playback from your home screen</string>
+    <string name="widget_previous">Previous</string>
+    <string name="widget_play_pause">Play or pause</string>
+    <string name="widget_next">Next</string>
+    <string name="widget_idle_title">VibeVault</string>
+    <string name="widget_idle_subtitle">Tap to open</string>
+    <string name="widget_description_square">Now playing card with controls</string>
+    <string name="widget_description_round">One-tap play / pause button</string>
+    <string name="widget_description_quick">Now playing and quick shortcuts</string>
+    <string name="widget_q_identify">Identify</string>
+    <string name="widget_q_radio">Radio</string>
+    <string name="widget_q_search">Search</string>
+    <string name="widget_q_media">Media</string>
+    <string name="widget_q_history">History</string>
+</resources>

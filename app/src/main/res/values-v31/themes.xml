@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.VibeVault" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/vv_midnight</item>
+        <item name="android:statusBarColor">@color/vv_midnight</item>
+        <item name="android:navigationBarColor">@color/vv_midnight</item>
+        <!-- Android 12+ system splash screen: the VV emblem on midnight navy -->
+        <item name="android:windowSplashScreenBackground">@color/vv_midnight</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+    </style>
+</resources>

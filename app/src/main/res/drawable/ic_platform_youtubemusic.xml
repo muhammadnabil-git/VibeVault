@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#FFE6192B"
+        android:pathData="M24,0A24,24 0 1,0 24,48A24,24 0 1,0 24,0z" />
+    <!-- simple stand-in glyph (a play triangle with a music note); drop the official artwork over this file to replace it -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M18,13L18,35L36,24z" />
+    <path android:fillColor="#FFE6192B"
+        android:pathData="M22.2,19.5L22.2,28.5L29.5,24z" />
+</vector>
