@@ -148,6 +148,20 @@ object Prefs {
     fun historyThumbs(ctx: Context) = sp(ctx).getBoolean("history_thumbs", true)
     fun setHistoryThumbs(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("history_thumbs", v).apply()
 
+    /** Media and History category filters are independently configurable from Settings → Behavior. */
+    fun categoryFilter(ctx: Context, history: Boolean, id: String): Boolean =
+        sp(ctx).getBoolean("${if (history) "history" else "media"}_filter_$id", true)
+    fun setCategoryFilter(ctx: Context, history: Boolean, id: String, enabled: Boolean) =
+        sp(ctx).edit().putBoolean("${if (history) "history" else "media"}_filter_$id", enabled).apply()
+
+    fun showHomeLibraryTabs(ctx: Context) = sp(ctx).getBoolean("home_library_tabs", true)
+    fun setShowHomeLibraryTabs(ctx: Context, enabled: Boolean) = sp(ctx).edit().putBoolean("home_library_tabs", enabled).apply()
+    fun showMediaLibraryTabs(ctx: Context) = sp(ctx).getBoolean("media_library_tabs", true)
+    fun setShowMediaLibraryTabs(ctx: Context, enabled: Boolean) = sp(ctx).edit().putBoolean("media_library_tabs", enabled).apply()
+    fun homeRecommendations(ctx: Context, kind: String) = sp(ctx).getBoolean("home_recommendations_$kind", true)
+    fun setHomeRecommendations(ctx: Context, kind: String, enabled: Boolean) =
+        sp(ctx).edit().putBoolean("home_recommendations_$kind", enabled).apply()
+
     // ---- v7.1 switches (Settings -> Behavior) ----
     fun resumePlayback(ctx: Context) = sp(ctx).getBoolean("resume_playback", true)
     fun setResumePlayback(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("resume_playback", v).apply()

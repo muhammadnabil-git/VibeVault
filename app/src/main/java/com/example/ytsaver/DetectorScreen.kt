@@ -199,7 +199,7 @@ fun DetectorScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { reset(); onClose() }) { Text(tr("← Back", "رجوع")) }
-            Text(tr("Music Detector", "كاشف الموسيقى"), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(tr("Radar", "رادار"), fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
         Column(
             Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),

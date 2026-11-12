@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.sp
 fun AboutSection() {
     val ctx = LocalContext.current
     val version = remember {
-        runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "7.3.5"
+        runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "7.7.2"
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -41,7 +41,7 @@ fun AboutSection() {
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                InfoRow(tr("Developer", "المطوّر"), "M.Nabil")
+                InfoRow(tr("Offered By", "مقدّم من"), "SunEye-Soft")
                 InfoRow(tr("Version", "الإصدار"), version)
             }
         }
@@ -53,12 +53,6 @@ fun AboutSection() {
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier.fillMaxWidth().height(50.dp),
         ) { Text(tr("Report a problem", "الإبلاغ عن مشكلة")) }
-
-        Button(
-            onClick = { sendEmail(ctx) },
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth().height(50.dp),
-        ) { Text(tr("Send email", "إرسال بريد إلكتروني")) }
 
         Text(
             tr(
@@ -96,7 +90,7 @@ private fun TestersCard(version: String) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth().clickable { open = !open }, verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(tr("Testers info", "معلومات المختبرين"), fontWeight = FontWeight.SemiBold)
+                    Text(tr("Release info", "معلومات الإصدار"), fontWeight = FontWeight.SemiBold)
                     if (!open) Text(tr("Version $version • Developer M.Nabil", "الإصدار $version • المطوّر M.Nabil"), color = Muted, fontSize = 12.sp, maxLines = 1)
                 }
                 Text(if (open) "▴" else "▾", color = Muted, fontSize = 18.sp)

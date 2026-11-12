@@ -1,3 +1,14 @@
+# 7.7.2
+
+## History, Media, and recommendations
+- History and Media keep independent view modes; History opens in List and Media opens in Sliders.
+- Search categories can be opened from a compact filter control and configured independently for each page.
+- Added related YouTube music and video recommendations to Home, and made Home/Media library shortcuts configurable.
+- Updated the mini player, radio frequency scale, global component shapes, and app labels.
+- About now credits SunEye-Soft and labels the release details; removed the Send email button.
+
+versionName 7.7.2 (versionCode 101). applicationId unchanged.
+
 # 7.7.1
 
 ## Navigation

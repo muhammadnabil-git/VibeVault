@@ -25,7 +25,7 @@ private fun guideSections(): List<GuideSection> = listOf(
         listOf(
             tr("VibeVault finds audio and video on the websites you use, saves it to your phone as MP3 (audio) or MP4 (video), and plays it in its own player. Everything you save stays on your phone and plays without internet.",
                 "يبحث التطبيق عن الصوت والفيديو في المواقع التي تستخدمها، ويحفظه في هاتفك بصيغة MP3 (صوت) أو MP4 (فيديو)، ويشغّله في مشغّله الخاص. كل ما تحفظه يبقى في هاتفك ويعمل دون إنترنت."),
-            tr("The tabs are Search (the magnifier), Download, Media and History. The icons at the top are International Radio, Sound Detector (a note with a magnifier), Notifications (bell) and Settings (gear). Favorites (heart) and Playlists are the two tabs at the bottom of the screen; tap the open one again to go back. The small (i) appears once after installing or updating and then lives in Settings → App guide.",
+            tr("The tabs are Search (the magnifier), Download, Media and History. The icons at the top are International Radio, Radar (a note with a magnifier), Notifications (bell) and Settings (gear). Favorites (heart) and Playlists are the two tabs at the bottom of the screen; tap the open one again to go back. The small (i) appears once after installing or updating and then lives in Settings → App guide.",
                 "التبويبات: البحث (العدسة)، التنزيل، الوسائط، السجل. الأيقونات في الأعلى: الراديو الدولي وكاشف الأغاني (نغمة مع عدسة) والإشعارات (الجرس) والإعدادات (الترس). المفضلة (القلب) وقوائم التشغيل هما التبويبان في أسفل الشاشة؛ اضغط المفتوح منهما مجددًا للعودة. تظهر (i) الصغيرة مرة واحدة بعد التثبيت أو التحديث ثم تبقى في الإعدادات ← دليل التطبيق."),
         ),
     ),
@@ -65,13 +65,13 @@ private fun guideSections(): List<GuideSection> = listOf(
         ),
     ),
     GuideSection(
-        tr("Sound Detector", "كاشف الأغاني"),
+        tr("Radar", "رادار"),
         listOf(
-            tr("• Tap the note-with-magnifier icon at the top, play a song near the phone and tap Listen. The detector asks several recognition engines one after another until one finds the song, then shows the cover, title, artist, album, year and more.",
+            tr("• Tap the note-with-magnifier icon at the top, play a song near the phone and tap Listen. Radar asks several recognition engines one after another until one finds the song, then shows the cover, title, artist, album, year and more.",
                 "• اضغط أيقونة النغمة مع العدسة في الأعلى، شغّل أغنية قرب الهاتف واضغط استماع. يسأل الكاشف عدة محركات تعرّف واحدًا بعد الآخر حتى يجد أحدها الأغنية، ثم يعرض الغلاف والعنوان والفنان والألبوم والسنة وغيرها."),
             tr("• Under the result: Send to Search (looks the song up in the Search tab) or Send to Download queue.",
                 "• تحت النتيجة: إرسال إلى البحث (للبحث عن الأغنية في تبويب البحث) أو إرسال إلى قائمة التنزيل."),
-            tr("• Settings → Music Detector shows which engines are used and what is left of each allowance; turn engines on or off there. A few seconds of clear sound near the start of the song work best.",
+            tr("• Settings → Radar Usage shows which engines are used and what is left of each allowance; turn engines on or off there. A few seconds of clear sound near the start of the song work best.",
                 "• الإعدادات ← كاشف الموسيقى تعرض المحركات المستخدمة وما تبقى من حصة كل منها؛ فعّل المحركات أو أوقفها من هناك. أفضل النتائج مع بضع ثوانٍ من صوت واضح قرب بداية الأغنية."),
         ),
     ),

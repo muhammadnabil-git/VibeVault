@@ -281,10 +281,10 @@ fun SettingsScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     var artistArt by remember { mutableStateOf(TrackArt.enabled(ctx)) }
                     Column(Modifier.weight(1f)) {
-                        Text(tr("Artist pictures", "صور الفنانين"))
+                        Text(tr("Artist and album covers", "صور الفنانين والألبومات"))
                         Text(
-                            tr("Songs without a cover show a photo of the artist. Only the artist's name is looked up online (Deezer), once, and the picture is kept on the phone.",
-                                "الأغاني بلا غلاف تعرض صورة الفنان. يُبحث عن اسم الفنان فقط عبر الإنترنت (Deezer) مرة واحدة وتُحفظ الصورة على الهاتف."),
+                            tr("When a track has no embedded cover, look up a matching official album cover and then the artist photo on Deezer. Turn this off to keep only embedded artwork.",
+                                "عند غياب غلاف داخل الملف، يُبحث عن غلاف ألبوم مطابق ثم صورة الفنان عبر Deezer. أوقف هذا الخيار للاكتفاء بالغلاف المضمّن."),
                             color = Muted, fontSize = 12.sp,
                         )
                     }
@@ -334,6 +334,34 @@ fun SettingsScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                     }
                     Switch(checked = historySearch, onCheckedChange = vm::setHistorySearch)
                 }
+                Text(tr("Media category filters", "مرشحات الوسائط"), fontWeight = FontWeight.SemiBold)
+                categoryFilterSettings(ctx, history = false)
+                Text(tr("History category filters", "مرشحات السجل"), fontWeight = FontWeight.SemiBold)
+                categoryFilterSettings(ctx, history = true)
+                PreferenceSwitch(
+                    key = "home_library_tabs",
+                    title = tr("Favorites and Playlists buttons on Home", "أزرار المفضلة وقوائم التشغيل في الرئيسية"),
+                    initial = Prefs.showHomeLibraryTabs(ctx),
+                    onChange = { Prefs.setShowHomeLibraryTabs(ctx, it) },
+                )
+                PreferenceSwitch(
+                    key = "media_library_tabs",
+                    title = tr("Favorites and Playlists buttons on Media", "أزرار المفضلة وقوائم التشغيل في الوسائط"),
+                    initial = Prefs.showMediaLibraryTabs(ctx),
+                    onChange = { Prefs.setShowMediaLibraryTabs(ctx, it) },
+                )
+                PreferenceSwitch(
+                    key = "home_recommendations_audio",
+                    title = tr("Recommended music on Home", "الموسيقى المقترحة في الرئيسية"),
+                    initial = Prefs.homeRecommendations(ctx, "audio"),
+                    onChange = { Prefs.setHomeRecommendations(ctx, "audio", it) },
+                )
+                PreferenceSwitch(
+                    key = "home_recommendations_video",
+                    title = tr("Recommended videos on Home", "الفيديوهات المقترحة في الرئيسية"),
+                    initial = Prefs.homeRecommendations(ctx, "video"),
+                    onChange = { Prefs.setHomeRecommendations(ctx, "video", it) },
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(tr("Show the source website", "إظهار الموقع المصدر"))
@@ -359,10 +387,10 @@ fun SettingsScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(tr("Show the Music Detector progress card", "إظهار بطاقة تقدّم كاشف الموسيقى"))
+                        Text(tr("Show the Radar progress card", "إظهار بطاقة تقدّم الرادار"))
                         Text(
-                            tr("The live card under the listen button: the detection phases and each engine's state. The allowance counts stay in Settings → Detector Consumption.",
-                                "البطاقة الحية تحت زر الاستماع: مراحل الكشف وحالة كل محرك. تبقى أعداد الحصص في الإعدادات ← استهلاك الكاشف."),
+                            tr("The live card under the listen button: the detection phases and each engine's state. Allowances stay in Settings → Radar Usage.",
+                                "البطاقة الحية تحت زر الاستماع: مراحل الكشف وحالة كل محرك. تبقى الحصص في الإعدادات ← استخدام الرادار."),
                             color = Muted, fontSize = 12.sp,
                         )
                     }
@@ -425,9 +453,9 @@ fun SettingsScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                 }
             }
 
-            // ---- Detector Consumption: which recognition engines the Music Detector uses, and what is left of each allowance ----
+            // ---- Radar Usage: recognition engines and remaining allowances ----
             CollapsibleCard(
-                tr("Detector Consumption", "استهلاك الكاشف"),
+                tr("Radar Usage", "استخدام الرادار"),
                 summary = if (DetectorPrefs.useAll) tr("All engines", "كل المحركات") else DetectorPrefs.selected.joinToString(" • "),
             ) {
                 DetectorConsumptionContent()
@@ -622,6 +650,42 @@ private fun SettingsCard(title: String, content: @Composable ColumnScope.() -> U
             Text(title, fontWeight = FontWeight.SemiBold)
             content()
         }
+    }
+}
+
+@Composable
+private fun categoryFilterSettings(ctx: android.content.Context, history: Boolean) {
+    val ids = listOf("all", "audio", "video", "youtube", "facebook")
+    ids.forEach { id ->
+        val label = when (id) {
+            "audio" -> tr("Audio", "صوت")
+            "video" -> tr("Video", "فيديو")
+            "youtube" -> "YouTube"
+            "facebook" -> "Facebook"
+            else -> tr("All", "الكل")
+        }
+        val title = if (history) tr("History: $label", "السجل: $label") else tr("Media: $label", "الوسائط: $label")
+        PreferenceSwitch(
+            key = "${if (history) "history" else "media"}_filter_$id",
+            title = title,
+            initial = Prefs.categoryFilter(ctx, history, id),
+            onChange = { Prefs.setCategoryFilter(ctx, history, id, it) },
+        )
+    }
+}
+
+@Composable
+private fun PreferenceSwitch(key: String, title: String, initial: Boolean, onChange: (Boolean) -> Unit) {
+    var checked by remember(key) { mutableStateOf(initial) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f), fontSize = 14.sp)
+        Switch(
+            checked = checked,
+            onCheckedChange = {
+                checked = it
+                onChange(it)
+            },
+        )
     }
 }
 

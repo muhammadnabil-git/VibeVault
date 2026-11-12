@@ -8,6 +8,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
@@ -26,6 +28,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -87,8 +90,17 @@ private fun ItemsTab(vm: DownloaderViewModel, history: Boolean) {
     val sub by vm.historySub.collectAsStateWithLifecycle()          // 0 = audio, 1 = video
     var selectMode by remember { mutableStateOf(false) }
     // view: 0 = list, 1 = grid, 2 = sliders (Audio and Video rows on ONE page); the old grid on/off flag is migrated
-    var viewMode by remember { mutableIntStateOf(Prefs.str(ctx, "media_view")?.toIntOrNull() ?: if (Prefs.bool(ctx, "media_grid", false)) 1 else 0) }
+    val viewPrefKey = if (history) "history_view" else "media_view"
+    val viewDefault = if (history) 0 else 2
+    var viewMode by remember {
+        mutableIntStateOf(
+            Prefs.str(ctx, viewPrefKey)?.toIntOrNull()
+                ?: if (!history && Prefs.bool(ctx, "media_grid", false)) 1 else viewDefault,
+        )
+    }
     var viewMenu by remember { mutableStateOf(false) }
+    var filtersExpanded by remember { mutableStateOf(false) }
+    var moreMenu by remember { mutableStateOf(false) }
     val grid = viewMode == 1
     val sliders = viewMode == 2
     var selected by remember { mutableStateOf(setOf<String>()) }   // uris
@@ -104,6 +116,15 @@ private fun ItemsTab(vm: DownloaderViewModel, history: Boolean) {
     var sortMenu by remember { mutableStateOf(false) }
     var importOpen by remember { mutableStateOf(false) }
     val showThumbs by vm.historyThumbs.collectAsStateWithLifecycle()
+    val categoryIds = listOf("all", "audio", "video", "youtube", "facebook")
+    val visibleCategories = remember(history, categoryIds) {
+        categoryIds.filter { Prefs.categoryFilter(ctx, history, it) }
+    }
+    val categoryPrefKey = if (history) "history_category_filter" else "media_category_filter"
+    var categoryFilter by remember(history) {
+        mutableStateOf(Prefs.str(ctx, categoryPrefKey)?.takeIf { it in categoryIds } ?: "all")
+    }
+    val activeCategory = if (searchOn && categoryFilter in visibleCategories) categoryFilter else "all"
 
     val audioCount = all.count { it.format == "MP3" }
     val videoCount = all.count { it.format == "MP4" }
@@ -111,21 +132,29 @@ private fun ItemsTab(vm: DownloaderViewModel, history: Boolean) {
     val q = if (searchOn) query.trim() else ""
     val effOrigin = if (searchOn && !history) originFilter else 0
     val effSite = if (sitesOn) siteFilter else null
-    val searching = q.isNotEmpty() || effOrigin != 0 || effSite != null
+    val searching = q.isNotEmpty() || effOrigin != 0 || effSite != null || activeCategory != "all"
     val sitesPresent = remember(all, sub, history) {
         all.filter { history || (if (sub == 0) it.format == "MP3" else it.format == "MP4") }.map { siteOfItem(it) }.distinct().sorted()
     }
+    val filterPanelAvailable = visibleCategories.isNotEmpty() || (searchOn && !history) || (sitesOn && sitesPresent.size > 1)
 
     // folders of this kind (Media only); a file is either in a folder or in the main list
     val folderList = remember(folders, sub, history) { if (history) emptyList() else folders.filter { it.kind == sub }.sortedBy { it.name.lowercase() } }
     val openFolder = folderList.firstOrNull { it.id == openFolderId }
     val inFolder = remember(folderList) { folderList.flatMap { it.uris }.toSet() }
 
-    val items = remember(all, sub, sortKey, sortAsc, history, q, effOrigin, effSite, groupBySite, sitesOn, folderList, openFolderId, sliders) {
+    val items = remember(all, sub, sortKey, sortAsc, history, q, effOrigin, effSite, activeCategory, groupBySite, sitesOn, folderList, openFolderId, sliders) {
         var list = if (history || sliders) all else all.filter { if (sub == 0) it.format == "MP3" else it.format == "MP4" }
         if (q.isNotEmpty()) list = list.filter { prettyName(it.name).contains(q, ignoreCase = true) || siteOfItem(it).contains(q, ignoreCase = true) }
         if (effOrigin == 1) list = list.filter { !it.isDeviceFile }
         effSite?.let { st -> list = list.filter { siteOfItem(it) == st } }
+        list = when (activeCategory) {
+            "audio" -> list.filter { it.format == "MP3" }
+            "video" -> list.filter { it.format == "MP4" }
+            "youtube" -> list.filter { siteOfItem(it).contains("youtube", ignoreCase = true) }
+            "facebook" -> list.filter { siteOfItem(it).contains("facebook", ignoreCase = true) }
+            else -> list
+        }
         val of = folderList.firstOrNull { it.id == openFolderId }
         list = when {
             of != null -> list.filter { it.uri in of.uris }                          // inside a folder
@@ -194,11 +223,11 @@ private fun ItemsTab(vm: DownloaderViewModel, history: Boolean) {
             }
         }
 
-        // search box and filters (Settings -> Behavior)
+        // search and collapsible filters (Settings -> Behavior)
         if (searchOn && all.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 6.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50))
                     .padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -218,24 +247,48 @@ private fun ItemsTab(vm: DownloaderViewModel, history: Boolean) {
                         Icon(Icons.Filled.Close, contentDescription = tr("Clear", "مسح"), tint = Muted, modifier = Modifier.size(18.dp))
                     }
                 } else Spacer(Modifier.height(32.dp))
+                if (filterPanelAvailable) {
+                    IconButton(
+                        onClick = { filtersExpanded = !filtersExpanded },
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.FilterList,
+                            contentDescription = tr("Filters", "عوامل التصفية"),
+                            tint = if (filtersExpanded || activeCategory != "all" || effOrigin != 0 || effSite != null) MaterialTheme.colorScheme.primary else Muted,
+                        )
+                    }
+                }
             }
         }
-        val chipsOn = (searchOn && !history) || (sitesOn && sitesPresent.size > 1)
-        if (chipsOn && all.isNotEmpty()) {
+        if (searchOn && filtersExpanded && filterPanelAvailable && all.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(top = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                FilterChip(
-                    selected = effOrigin == 0 && effSite == null,
-                    onClick = { originFilter = 0; siteFilter = null },
-                    label = { Text(tr("All", "الكل"), fontSize = 12.sp) },
-                )
+                visibleCategories.forEach { id ->
+                    val label = when (id) {
+                        "audio" -> tr("Audio", "صوت")
+                        "video" -> tr("Video", "فيديو")
+                        "youtube" -> "YouTube"
+                        "facebook" -> "Facebook"
+                        else -> tr("All", "الكل")
+                    }
+                    VvChip(
+                        label,
+                        selected = activeCategory == id,
+                        onClick = {
+                            categoryFilter = id
+                            Prefs.putStr(ctx, categoryPrefKey, id)
+                            if (id == "all") { originFilter = 0; siteFilter = null }
+                        },
+                    )
+                }
                 if (searchOn && !history) {
-                    FilterChip(selected = effOrigin == 1, onClick = { originFilter = if (originFilter == 1) 0 else 1 }, label = { Text(tr("Downloaded", "منزَّل"), fontSize = 12.sp) })
+                    VvChip(tr("Downloaded", "منزَّل"), selected = effOrigin == 1, onClick = { originFilter = if (originFilter == 1) 0 else 1 })
                 }
                 if (sitesOn && sitesPresent.size > 1) sitesPresent.forEach { st ->
-                    FilterChip(selected = effSite == st, onClick = { siteFilter = if (siteFilter == st) null else st }, label = { Text(st, fontSize = 12.sp) })
+                    VvChip(st, selected = effSite == st, onClick = { siteFilter = if (siteFilter == st) null else st })
                 }
             }
         }
@@ -322,8 +375,8 @@ private fun ItemsTab(vm: DownloaderViewModel, history: Boolean) {
                                     text = { Text(label, fontWeight = if (viewMode == mode) FontWeight.Bold else FontWeight.Normal) },
                                     onClick = {
                                         viewMode = mode
-                                        Prefs.putStr(ctx, "media_view", mode.toString())
-                                        Prefs.putBool(ctx, "media_grid", mode == 1)
+                                        Prefs.putStr(ctx, viewPrefKey, mode.toString())
+                                        if (!history) Prefs.putBool(ctx, "media_grid", mode == 1)
                                         if (mode == 2) exitSelect()
                                         viewMenu = false
                                     },
@@ -331,16 +384,38 @@ private fun ItemsTab(vm: DownloaderViewModel, history: Boolean) {
                             }
                         }
                     }
-                    if (!sliders) TextButton(onClick = { if (selectMode) exitSelect() else selectMode = true }, contentPadding = tight) {
-                        Text(if (selectMode) tr("Done", "تم") else tr("Select", "تحديد"), maxLines = 1)
-                    }
-                    if (selectMode && !sliders) {
-                        TextButton(onClick = { selected = items.map { it.uri }.toSet() }, contentPadding = tight) {
-                            Text(tr("Select all", "تحديد الكل"), maxLines = 1)
+                    if (history) {
+                        Box {
+                            IconButton(onClick = { moreMenu = true }, modifier = Modifier.size(40.dp)) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = tr("More options", "خيارات إضافية"))
+                            }
+                            DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                                if (!sliders) DropdownMenuItem(
+                                    text = { Text(if (selectMode) tr("Done", "تم") else tr("Select", "تحديد")) },
+                                    onClick = { if (selectMode) exitSelect() else selectMode = true; moreMenu = false },
+                                )
+                                if (selectMode && !sliders) DropdownMenuItem(
+                                    text = { Text(tr("Select all", "تحديد الكل")) },
+                                    onClick = { selected = items.map { it.uri }.toSet(); moreMenu = false },
+                                )
+                                if (openFolder == null) DropdownMenuItem(
+                                    text = { Text(tr("Clear all", "مسح الكل"), color = Red) },
+                                    onClick = { confirmClear = true; moreMenu = false },
+                                )
+                            }
                         }
-                    } else if (openFolder == null) {
-                        TextButton(onClick = { confirmClear = true }, contentPadding = tight) {
-                            Text(tr("Clear all", "مسح الكل"), maxLines = 1)
+                    } else {
+                        if (!sliders) TextButton(onClick = { if (selectMode) exitSelect() else selectMode = true }, contentPadding = tight) {
+                            Text(if (selectMode) tr("Done", "تم") else tr("Select", "تحديد"), maxLines = 1)
+                        }
+                        if (selectMode && !sliders) {
+                            TextButton(onClick = { selected = items.map { it.uri }.toSet() }, contentPadding = tight) {
+                                Text(tr("Select all", "تحديد الكل"), maxLines = 1)
+                            }
+                        } else if (openFolder == null) {
+                            TextButton(onClick = { confirmClear = true }, contentPadding = tight) {
+                                Text(tr("Clear all", "مسح الكل"), maxLines = 1)
+                            }
                         }
                     }
                 }
@@ -375,6 +450,7 @@ private fun ItemsTab(vm: DownloaderViewModel, history: Boolean) {
                         HistoryGridCard(
                             item = item, vm = vm, selectMode = selectMode, isSelected = item.uri in selected,
                             showThumb = item.format == "MP4",
+                            source = if (sitesOn) site else null,
                             movable = !history,
                             onToggleSelect = { selected = if (item.uri in selected) selected - item.uri else selected + item.uri },
                             onHoldSelect = { selectMode = true; selected = selected + item.uri; vm.setHistoryExpanded(null) },
@@ -798,13 +874,29 @@ private fun HistoryRow(
             // ---- the compact line ----
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (selectMode) Checkbox(checked = isSelected, onCheckedChange = { onToggleSelect() })
-                if (showThumb) {
-                    VideoThumb(item, Modifier.padding(end = 10.dp).width(80.dp).height(45.dp).clip(RoundedCornerShape(8.dp)))
+                Box(Modifier.padding(end = 10.dp).size(90.dp).clip(RoundedCornerShape(Vv.rSmall))) {
+                    when {
+                        item.format == "MP4" && showThumb -> VideoThumb(item, Modifier.fillMaxSize())
+                        item.format == "MP4" -> Box(
+                            Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center,
+                        ) { Sym(R.drawable.ic_play, 24.dp, tint = Muted) }
+                        else -> TrackArtImage(item, Modifier.fillMaxSize(), iconSize = 30.dp)
+                    }
+                    if (!selectMode) {
+                        IconButton(
+                            onClick = ::play,
+                            modifier = Modifier.align(Alignment.Center).size(30.dp)
+                                .background(Color.Black.copy(alpha = 0.48f), CircleShape),
+                        ) {
+                            Sym(R.drawable.ic_play, 18.dp, tint = Color.White)
+                        }
+                    }
                 }
                 Column(Modifier.weight(1f).padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
                         prettyName(item.name), fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
-                        maxLines = if (open) 3 else 1, overflow = TextOverflow.Ellipsis,
+                        maxLines = if (open) 3 else 2, overflow = TextOverflow.Ellipsis,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (siteBadge != null) {
@@ -813,17 +905,14 @@ private fun HistoryRow(
                             }
                             Spacer(Modifier.width(6.dp))
                         }
-                        Text(
-                            "${if (item.isDeviceFile) item.name.substringAfterLast('.', item.format).uppercase() else item.format} • $q • ${formatSize(item.sizeBytes)} • ${shortDate.format(item.timeMillis)}",
-                            color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
+                        Text("${if (item.isDeviceFile) item.name.substringAfterLast('.', item.format).uppercase() else item.format} • $q",
+                            color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
+                    Text("${siteBadge ?: siteOfItem(item)} • ${formatSize(item.sizeBytes)} • ${shortDate.format(item.timeMillis)}",
+                        color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (!selectMode) {
                     HeartButton(item.toEntry(), 36.dp)
-                    IconButton(onClick = { play() }) {
-                        Sym(R.drawable.ic_play, 24.dp, tint = MaterialTheme.colorScheme.primary)
-                    }
                     // the standard "More options" three-dot menu
                     var menu by remember { mutableStateOf(false) }
                     Box {
@@ -1075,6 +1164,7 @@ private fun HistoryGridCard(
     selectMode: Boolean,
     isSelected: Boolean,
     showThumb: Boolean,
+    source: String?,
     movable: Boolean,
     onToggleSelect: () -> Unit,
     onHoldSelect: () -> Unit,
@@ -1100,16 +1190,21 @@ private fun HistoryGridCard(
         ),
     ) {
         Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box {
-                if (showThumb) VideoThumb(item, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)))
-                else Box(
-                    Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center,
-                ) { Sym(R.drawable.ic_play, 28.dp, tint = Muted) }
+            Box(Modifier.size(90.dp).clip(RoundedCornerShape(Vv.rSmall))) {
+                when {
+                    item.format == "MP4" && showThumb -> VideoThumb(item, Modifier.fillMaxSize())
+                    item.format == "MP4" -> Box(
+                        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) { Sym(R.drawable.ic_play, 24.dp, tint = Muted) }
+                    else -> TrackArtImage(item, Modifier.fillMaxSize(), iconSize = 30.dp)
+                }
                 if (selectMode) Checkbox(checked = isSelected, onCheckedChange = { onToggleSelect() }, modifier = Modifier.align(Alignment.TopStart))
             }
             Text(prettyName(item.name), fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text("$q • ${formatSize(item.sizeBytes)}", color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOfNotNull(source, item.format, q).joinToString(" • "), color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("${formatSize(item.sizeBytes)} • ${SimpleDateFormat("MMM d", Locale.getDefault()).format(item.timeMillis)}",
+                color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (!selectMode) Row(verticalAlignment = Alignment.CenterVertically) {
                 HeartButton(item.toEntry(), 34.dp)
                 Spacer(Modifier.weight(1f))

@@ -82,6 +82,10 @@ object VaultStore {
     val unlocked: StateFlow<Boolean> = _unlocked.asStateFlow()
     /** The vault page is open inside Settings (kept here so it survives the player opening on top of it). */
     val screenOpen = MutableStateFlow(false)
+    private val _resetRequested = MutableStateFlow(false)
+    val resetRequested: StateFlow<Boolean> = _resetRequested.asStateFlow()
+    private val _resetAuthorized = MutableStateFlow(false)
+    val resetAuthorized: StateFlow<Boolean> = _resetAuthorized.asStateFlow()
 
     private var file: File? = null
     private var failures = 0
@@ -140,6 +144,33 @@ object VaultStore {
         val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
         Prefs.putStr(ctx, K_SALT, hex(salt))
         Prefs.putStr(ctx, K_HASH, hex(hash(pin, salt)))
+    }
+
+    fun beginPinReset() {
+        _resetAuthorized.value = false
+        _resetRequested.value = true
+        screenOpen.value = true
+    }
+
+    fun authorizePinReset() {
+        _resetAuthorized.value = true
+        _resetRequested.value = true
+        screenOpen.value = true
+    }
+
+    fun cancelPinReset() {
+        _resetRequested.value = false
+        _resetAuthorized.value = false
+    }
+
+    fun completePinReset(ctx: Context, pin: String) {
+        check(_resetAuthorized.value) { "Verify the recovery email before resetting the vault PIN." }
+        setPin(ctx, pin)
+        failures = 0
+        lockedUntil = 0L
+        _unlocked.value = true
+        _resetRequested.value = false
+        _resetAuthorized.value = false
     }
 
     fun verify(ctx: Context, pin: String): Boolean {
@@ -319,37 +350,132 @@ fun VaultPinDialog(change: Boolean, onDismiss: () -> Unit, onDone: () -> Unit) {
     var p1 by remember { mutableStateOf("") }
     var p2 by remember { mutableStateOf("") }
     var err by remember { mutableStateOf<String?>(null) }
+    var recoverySetup by remember { mutableStateOf(false) }
+    if (recoverySetup) {
+        RecoveryEmailSetupDialog(
+            onDismiss = onDismiss,
+            requireCurrentPin = change,
+            onVerified = {
+                VaultStore.setPin(ctx, p1)
+                onDone()
+            },
+        )
+    } else {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(if (change) tr("Change vault PIN", "تغيير رمز الخزنة") else tr("Set a vault PIN", "تعيين رمز الخزنة")) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!change) Text(
+                        tr("Before the PIN is saved, verify a recovery email. You can use it to reset your PIN without erasing vault files.",
+                            "قبل حفظ الرمز، أكّد بريدًا إلكترونيًا للاسترداد. يمكنك استخدامه لإعادة تعيين الرمز دون مسح ملفات الخزنة."),
+                        color = Muted, fontSize = 12.sp,
+                    )
+                    if (change) PinField(old, { old = it }, tr("Current PIN", "الرمز الحالي"))
+                    PinField(p1, { p1 = it }, tr("New PIN (4–12 digits)", "الرمز الجديد (4–12 رقمًا)"))
+                    PinField(p2, { p2 = it }, tr("Repeat the PIN", "أعد كتابة الرمز"))
+                    err?.let { Text(it, color = Red, fontSize = 12.sp) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (change && !VaultStore.verify(ctx, old)) {
+                        err = L.t("The current PIN is wrong.", "الرمز الحالي غير صحيح.")
+                    } else if (p1.length < 4) {
+                        err = L.t("Use at least 4 digits.", "استخدم 4 أرقام على الأقل.")
+                    } else if (p1 != p2) {
+                        err = L.t("The two PINs don't match.", "الرمزان غير متطابقين.")
+                    } else if (change) {
+                        VaultStore.setPin(ctx, p1)
+                        onDone()
+                    } else if (VaultRecovery.emailHint(ctx) != null) {
+                        VaultStore.setPin(ctx, p1)
+                        onDone()
+                    } else {
+                        recoverySetup = true
+                    }
+                }) { Text(if (change) tr("Save", "حفظ") else tr("Continue", "متابعة")) }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text(tr("Cancel", "إلغاء")) } },
+        )
+    }
+}
+
+@Composable
+private fun RecoveryEmailSetupDialog(
+    onDismiss: () -> Unit,
+    requireCurrentPin: Boolean = false,
+    onVerified: (String?) -> Unit,
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val recoveryRevision by VaultRecovery.revision.collectAsStateWithLifecycle()
+    var email by remember { mutableStateOf("") }
+    var currentPin by remember { mutableStateOf("") }
+    var sent by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var requestRevision by remember { mutableIntStateOf(recoveryRevision) }
+
+    LaunchedEffect(sent, recoveryRevision) {
+        if (sent && recoveryRevision > requestRevision && VaultRecovery.isRecoveryEmail(ctx, email)) {
+            onVerified(VaultRecovery.emailHint(ctx))
+        }
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (change) tr("Change vault PIN", "تغيير رمز الخزنة") else tr("Set a vault PIN", "تعيين رمز الخزنة")) },
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text(tr("Verify recovery email", "تأكيد بريد الاسترداد")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!change) Text(
-                    tr("The PIN opens the vault. It cannot be recovered: if you forget it, the only way out is to erase the vault.",
-                        "الرمز يفتح الخزنة ولا يمكن استرجاعه: إذا نسيته فالحل الوحيد هو مسح الخزنة."),
-                    color = Muted, fontSize = 12.sp,
-                )
-                if (change) PinField(old, { old = it }, tr("Current PIN", "الرمز الحالي"))
-                PinField(p1, { p1 = it }, tr("New PIN (4–12 digits)", "الرمز الجديد (4–12 رقمًا)"))
-                PinField(p2, { p2 = it }, tr("Repeat the PIN", "أعد كتابة الرمز"))
-                err?.let { Text(it, color = Red, fontSize = 12.sp) }
+                if (sent) {
+                    Text(
+                        tr("Open the sign-in link sent to $email, then return to VibeVault. The email will be saved after the link is verified.",
+                            "افتح رابط تسجيل الدخول المرسل إلى $email، ثم عُد إلى VibeVault. سيُحفظ البريد بعد تأكيد الرابط."),
+                        color = Muted,
+                    )
+                } else {
+                    if (requireCurrentPin) {
+                        Text(tr("Enter your current vault PIN to change its recovery email.", "أدخل رمز الخزنة الحالي لتغيير بريد الاسترداد."), color = Muted)
+                        PinField(currentPin, { currentPin = it; error = null }, tr("Current PIN", "الرمز الحالي"))
+                    } else {
+                        Text(tr("A secure sign-in link will be sent to this address.", "سيُرسل رابط تسجيل دخول آمن إلى هذا العنوان."), color = Muted)
+                    }
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it; error = null },
+                        label = { Text(tr("Recovery email", "بريد الاسترداد")) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                error?.let { Text(it, color = Red, fontSize = 12.sp) }
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                if (change && !VaultStore.verify(ctx, old)) {
-                    err = L.t("The current PIN is wrong.", "الرمز الحالي غير صحيح.")
-                } else if (p1.length < 4) {
-                    err = L.t("Use at least 4 digits.", "استخدم 4 أرقام على الأقل.")
-                } else if (p1 != p2) {
-                    err = L.t("The two PINs don't match.", "الرمزان غير متطابقين.")
-                } else {
-                    VaultStore.setPin(ctx, p1)
-                    onDone()
+            TextButton(enabled = !busy && !sent && email.isNotBlank() && (!requireCurrentPin || currentPin.length >= 4), onClick = {
+                busy = true
+                error = null
+                scope.launch {
+                    try {
+                        if (requireCurrentPin && !VaultStore.verify(ctx, currentPin)) {
+                            error = L.t("The current PIN is wrong.", "الرمز الحالي غير صحيح.")
+                        } else {
+                            requestRevision = recoveryRevision
+                            VaultRecovery.beginSetup(ctx, email)
+                            sent = true
+                        }
+                    } catch (e: Exception) {
+                        error = e.localizedMessage ?: L.t("Recovery email verification failed.", "فشل التحقق من بريد الاسترداد.")
+                    } finally {
+                        busy = false
+                    }
                 }
-            }) { Text(tr("Save", "حفظ")) }
+            }) { Text(tr("Send sign-in link", "إرسال رابط تسجيل الدخول")) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("Cancel", "إلغاء")) } },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text(tr("Cancel", "إلغاء")) } },
     )
 }
 
@@ -415,7 +541,10 @@ fun VaultMoveFlow(items: List<HistoryItem>, onDone: () -> Unit) {
 fun VaultScreen(vm: DownloaderViewModel, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val unlocked by VaultStore.unlocked.collectAsStateWithLifecycle()
-    BackHandler(onBack = onBack)
+    BackHandler(onBack = {
+        VaultStore.cancelPinReset()
+        onBack()
+    })
     // leaving the vault page (back, Settings, another page, the app) locks it again; opening the player on a vault file does not
     DisposableEffect(Unit) {
         VaultStore.keepForPlayer = false
@@ -436,7 +565,12 @@ private fun VaultLocked() {
     var pin by remember { mutableStateOf("") }
     var msg by remember { mutableStateOf<String?>(null) }
     var setOpen by remember { mutableStateOf(false) }
+    val resetRequested by VaultStore.resetRequested.collectAsStateWithLifecycle()
+    val recoveryRevision by VaultRecovery.revision.collectAsStateWithLifecycle()
     val hasPin = remember(setOpen) { VaultStore.hasPin(ctx) }
+    LaunchedEffect(recoveryRevision) {
+        if (!VaultStore.hasPin(ctx) && VaultRecovery.emailHint(ctx) != null) setOpen = true
+    }
     Column(
         Modifier.fillMaxSize().padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -469,9 +603,129 @@ private fun VaultLocked() {
                 enabled = pin.length >= 4,
                 shape = RoundedCornerShape(12.dp),
             ) { Text(tr("Unlock", "فتح")) }
+            TextButton(onClick = VaultStore::beginPinReset, modifier = Modifier.padding(top = 4.dp)) {
+                Text(tr("Forgot the PIN? Reset it", "نسيت الرمز؟ أعد تعيينه"))
+            }
         }
     }
     if (setOpen) VaultPinDialog(change = false, onDismiss = { setOpen = false }, onDone = { setOpen = false })
+    if (resetRequested) {
+        VaultPinResetDialog(
+            onDismiss = VaultStore::cancelPinReset,
+            onDone = { pinValue -> VaultStore.completePinReset(ctx, pinValue) },
+        )
+    }
+}
+
+@Composable
+private fun VaultPinResetDialog(onDismiss: () -> Unit, onDone: (String) -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val resetAuthorized by VaultStore.resetAuthorized.collectAsStateWithLifecycle()
+    var stage by remember { mutableIntStateOf(0) }
+    var email by remember { mutableStateOf("") }
+    var pin by remember { mutableStateOf("") }
+    var repeatPin by remember { mutableStateOf("") }
+    var emailHint by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(resetAuthorized) {
+        if (resetAuthorized) {
+            stage = 2
+            error = null
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        try {
+            emailHint = VaultRecovery.emailHint(ctx)
+        } catch (e: Exception) {
+            error = e.localizedMessage ?: L.t("Unable to load recovery details.", "تعذّر تحميل تفاصيل الاسترداد.")
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text(tr("Reset vault PIN", "إعادة تعيين رمز الخزنة")) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                when (stage) {
+                    0 -> {
+                        Text(
+                            tr("Recovery email: ${emailHint ?: "not set"}", "بريد الاسترداد: ${emailHint ?: "غير معيّن"}"),
+                            color = Muted, fontSize = 12.sp,
+                        )
+                        if (emailHint == null) {
+                            Text(tr("No recovery email is set. You can erase the vault from Settings instead.", "لم يتم تعيين بريد للاسترداد. يمكنك مسح الخزنة من الإعدادات."), color = Muted, fontSize = 12.sp)
+                        }
+                        OutlinedTextField(
+                            value = email,
+                            onValueChange = { email = it; error = null },
+                            label = { Text(tr("Confirm recovery email", "أكّد بريد الاسترداد")) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    1 -> {
+                        Text(
+                            tr("Open the secure sign-in link sent to ${emailHint ?: email}, then return here to choose a new PIN.",
+                                "افتح رابط تسجيل الدخول الآمن المرسل إلى ${emailHint ?: email}، ثم عُد إلى هنا لاختيار رمز جديد."),
+                            color = Muted, fontSize = 12.sp,
+                        )
+                    }
+                    else -> {
+                        Text(tr("Choose a new vault PIN.", "اختر رمزًا جديدًا للخزنة."), color = Muted, fontSize = 12.sp)
+                        PinField(pin, { pin = it; error = null }, tr("New PIN (4–12 digits)", "الرمز الجديد (4–12 رقمًا)"))
+                        PinField(repeatPin, { repeatPin = it; error = null }, tr("Repeat the PIN", "أعد كتابة الرمز"))
+                    }
+                }
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                error?.let { Text(it, color = Red, fontSize = 12.sp) }
+            }
+        },
+        confirmButton = {
+            val enabled = !busy && when (stage) {
+                0 -> email.isNotBlank() && emailHint != null
+                1 -> false
+                else -> pin.length >= 4 && repeatPin.length >= 4
+            }
+            TextButton(enabled = enabled, onClick = {
+                error = null
+                if (stage == 2 && pin != repeatPin) {
+                    error = L.t("The two PINs don't match.", "الرمزان غير متطابقين.")
+                    return@TextButton
+                }
+                busy = true
+                scope.launch {
+                    try {
+                        when (stage) {
+                            0 -> {
+                                VaultRecovery.requestReset(ctx, email)
+                                stage = if (VaultStore.resetAuthorized.value) 2 else 1
+                            }
+                            1 -> Unit
+                            else -> {
+                                onDone(pin)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        error = e.localizedMessage ?: L.t("PIN reset failed.", "فشلت إعادة تعيين الرمز.")
+                    } finally {
+                        busy = false
+                    }
+                }
+            }) {
+                Text(when (stage) {
+                    0 -> tr("Send sign-in link", "إرسال رابط تسجيل الدخول")
+                    1 -> tr("Waiting for email link", "بانتظار رابط البريد")
+                    else -> tr("Save new PIN", "حفظ الرمز الجديد")
+                })
+            }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text(tr("Cancel", "إلغاء")) } },
+    )
 }
 
 @Composable
@@ -588,7 +842,7 @@ private fun VaultContent(vm: DownloaderViewModel) {
     }
 }
 
-/** The Vault card of the Settings page: PIN, open, erase. */
+/** The Vault card of the Settings page: PIN management, recovery, open, erase. */
 @Composable
 fun VaultSettingsCard(onOpen: () -> Unit) {
     val ctx = LocalContext.current
@@ -596,8 +850,25 @@ fun VaultSettingsCard(onOpen: () -> Unit) {
     val items by VaultStore.items.collectAsStateWithLifecycle()
     var pinDialog by remember { mutableStateOf(false) }
     var eraseOpen by remember { mutableStateOf(false) }
-    var version by remember { mutableIntStateOf(0) }                 // re-reads "has PIN" after a change
-    val hasPin = remember(version) { VaultStore.hasPin(ctx) }
+    var recoverySetupOpen by remember { mutableStateOf(false) }
+    var version by remember { mutableIntStateOf(0) }
+    val recoveryRevision by VaultRecovery.revision.collectAsStateWithLifecycle()
+    val hasPin = VaultStore.hasPin(ctx)
+    var recoveryHint by remember { mutableStateOf<String?>(null) }
+    var recoveryError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(hasPin, version, recoveryRevision) {
+        if (hasPin) {
+            try {
+                recoveryHint = VaultRecovery.emailHint(ctx)
+                recoveryError = null
+            } catch (e: Exception) {
+                recoveryError = e.localizedMessage ?: L.t("Unable to load recovery email.", "تعذّر تحميل بريد الاسترداد.")
+            }
+        } else {
+            recoveryHint = null
+            recoveryError = null
+        }
+    }
     Text(
         tr("Keep private files away from Media, History and playlists. Files in the vault live in the app's private storage and open only with your PIN. The vault locks by itself as soon as you leave it (or the app).",
             "احتفظ بالملفات الخاصة بعيدًا عن الوسائط والسجل وقوائم التشغيل. ملفات الخزنة تُحفظ في التخزين الخاص بالتطبيق ولا تُفتح إلا بالرمز. تُقفل الخزنة تلقائيًا بمجرد مغادرتها (أو مغادرة التطبيق)."),
@@ -614,10 +885,35 @@ fun VaultSettingsCard(onOpen: () -> Unit) {
             Text(if (hasPin) tr("Change PIN", "تغيير الرمز") else tr("Set PIN", "تعيين الرمز"))
         }
     }
-    if (hasPin) TextButton(onClick = { eraseOpen = true }) {
-        Text(tr("Forgot the PIN? Erase the vault", "نسيت الرمز؟ مسح الخزنة"), color = Red, fontSize = 13.sp)
+    if (hasPin) {
+        Text(
+            recoveryError ?: tr(
+                recoveryHint?.let { "Recovery email: $it" } ?: "Recovery email is not set",
+                recoveryHint?.let { "بريد الاسترداد: $it" } ?: "لم يتم تعيين بريد للاسترداد",
+            ),
+            color = if (recoveryError == null) Muted else Red,
+            fontSize = 12.sp,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { recoverySetupOpen = true }) {
+                Text(if (recoveryHint == null) tr("Add recovery email", "إضافة بريد للاسترداد") else tr("Change recovery email", "تغيير بريد الاسترداد"))
+            }
+            TextButton(onClick = VaultStore::beginPinReset) {
+                Text(tr("Reset PIN", "إعادة تعيين الرمز"))
+            }
+        }
+        TextButton(onClick = { eraseOpen = true }) {
+            Text(tr("Forgot the PIN? Erase the vault", "نسيت الرمز؟ مسح الخزنة"), color = Red, fontSize = 13.sp)
+        }
     }
     if (pinDialog) VaultPinDialog(change = hasPin, onDismiss = { pinDialog = false }, onDone = { pinDialog = false; version++ })
+    if (recoverySetupOpen) {
+        RecoveryEmailSetupDialog(
+            onDismiss = { recoverySetupOpen = false },
+            requireCurrentPin = hasPin,
+            onVerified = { recoveryHint = it; recoverySetupOpen = false },
+        )
+    }
     if (eraseOpen) {
         AlertDialog(
             onDismissRequest = { eraseOpen = false },

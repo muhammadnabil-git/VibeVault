@@ -31,6 +31,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -49,12 +50,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.util.Calendar
 
 /** Which sections of the Home dashboard are shown. Stored on the phone; the user can change them with "Customize". */
 object HomePrefs {
-    val SECTIONS = listOf("shortcuts", "videos", "played", "recent", "smart", "library")
+    val SECTIONS = listOf("shortcuts", "recommend_audio", "recommend_video", "played", "recent", "smart", "library")
     fun on(ctx: android.content.Context, id: String) = Prefs.bool(ctx, "home_$id", true)
     fun set(ctx: android.content.Context, id: String, v: Boolean) = Prefs.putBool(ctx, "home_$id", v)
 }
@@ -75,14 +79,80 @@ fun HomeTab(vm: DownloaderViewModel) {
     val ctx = LocalContext.current
     val history by vm.history.collectAsStateWithLifecycle()
     val job by vm.state.collectAsStateWithLifecycle()
+    val feed by vm.feed.collectAsStateWithLifecycle()
     var customize by remember { mutableStateOf(false) }
     // the shown sections are read again after the dialog closes
     var version by remember { mutableStateOf(0) }
     val show = remember(version) { HomePrefs.SECTIONS.associateWith { HomePrefs.on(ctx, it) } }
 
     val recent = remember(history) { history.sortedByDescending { it.timeMillis }.take(12) }
-    // every video saved or imported (newest first)
-    val videos = remember(history) { history.filter { it.format == "MP4" }.sortedByDescending { it.timeMillis }.take(30) }
+    val playedItems = remember(history, version) {
+        val byUri = history.associateBy { it.uri }
+        PlayLog.recent(ctx, 12).mapNotNull { byUri[it] }
+    }
+    val audioQuery = remember(history, playedItems, feed.searchedQuery) {
+        feed.searchedQuery.takeIf { it.isNotBlank() }
+            ?: (playedItems.firstOrNull { it.format == "MP3" }
+                ?: history.filter { it.format == "MP3" }.maxByOrNull { it.timeMillis })
+                ?.let { TrackArt.artistFromName(it.name) ?: prettyName(it.name) }
+                .orEmpty()
+    }
+    val recentChannel = feed.siteResults["YouTube"]?.firstOrNull()?.uploader?.takeIf { it.isNotBlank() }
+    val videoQuery = remember(history, playedItems, feed.searchedQuery, recentChannel) {
+        feed.searchedQuery.takeIf { it.isNotBlank() }
+            ?: recentChannel
+            ?: (playedItems.firstOrNull { it.format == "MP4" }
+                ?: history.filter { it.format == "MP4" }.maxByOrNull { it.timeMillis })
+                ?.let { prettyName(it.name) }
+                .orEmpty()
+    }
+    val audioRecommendationsOn = show["recommend_audio"] == true && Prefs.homeRecommendations(ctx, "audio")
+    val videoRecommendationsOn = show["recommend_video"] == true && Prefs.homeRecommendations(ctx, "video")
+    var recommendedAudio by remember { mutableStateOf<List<FeedItem>>(emptyList()) }
+    var recommendedVideos by remember { mutableStateOf<List<FeedItem>>(emptyList()) }
+    var recommendationError by remember { mutableStateOf(false) }
+    var recommendationsLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(audioQuery, videoQuery, audioRecommendationsOn, videoRecommendationsOn) {
+        if (!audioRecommendationsOn && !videoRecommendationsOn) return@LaunchedEffect
+        if ((!audioRecommendationsOn || audioQuery.isBlank()) && (!videoRecommendationsOn || videoQuery.isBlank())) {
+            recommendedAudio = emptyList()
+            recommendedVideos = emptyList()
+            recommendationError = false
+            recommendationsLoading = false
+            return@LaunchedEffect
+        }
+        recommendedAudio = emptyList()
+        recommendedVideos = emptyList()
+        recommendationError = false
+        recommendationsLoading = true
+        try {
+            val results = withContext(Dispatchers.IO) {
+                DownloadEngine.state.first { it.engineReady }
+                coroutineScope {
+                    val audio = async {
+                        if (!audioRecommendationsOn || audioQuery.isBlank()) emptyList<FeedItem>()
+                        else FeedLoader.search("$audioQuery official audio").map {
+                            it.copy(url = it.url.replace("www.youtube.com", "music.youtube.com"), isAudio = true)
+                        }
+                    }
+                    val videos = async {
+                        if (!videoRecommendationsOn || videoQuery.isBlank()) emptyList<FeedItem>()
+                        else FeedLoader.search("$videoQuery official music video")
+                    }
+                    audio.await() to videos.await()
+                }
+            }
+            recommendedAudio = results.first
+            recommendedVideos = results.second
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            recommendationError = true
+        } finally {
+            recommendationsLoading = false
+        }
+    }
 
     fun play(item: HistoryItem) {
         if (fileExists(ctx, item)) vm.playNow(listOf(item))
@@ -128,7 +198,7 @@ fun HomeTab(vm: DownloaderViewModel) {
         // ---- shortcuts
         if (show["shortcuts"] == true) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                VvIconTile(R.drawable.ic_music_search, tr("Identify", "تعرّف"), vm::openDetector, Modifier.weight(1f))
+                VvIconTile(R.drawable.ic_music_search, tr("Radar", "رادار"), vm::openDetector, Modifier.weight(1f))
                 VvIconTile(R.drawable.ic_radio, tr("Radio", "الراديو"), vm::openRadio, Modifier.weight(1f), accent = MaterialTheme.colorScheme.secondary)
                 VvIconTile(R.drawable.ic_download, tr("Download", "التنزيل"), { vm.setTab(1) }, Modifier.weight(1f))
                 VvIconTile(R.drawable.ic_folder, tr("Media", "الوسائط"), { vm.setTab(2) }, Modifier.weight(1f), accent = MaterialTheme.colorScheme.secondary)
@@ -136,21 +206,25 @@ fun HomeTab(vm: DownloaderViewModel) {
             }
         }
 
-        // ---- videos downloaded / imported
-        if (show["videos"] == true && videos.isNotEmpty()) {
-            VvSectionHeader(tr("Videos", "الفيديوهات"), tr("See all", "عرض الكل"), onAction = { vm.setTab(2); vm.setHistorySub(1) })
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(Vv.md)) {
-                items(videos, key = { it.uri }) { item ->
-                    MediaCard(item, subtitle = "${item.format} • ${formatSize(item.sizeBytes)}") { play(item) }
-                }
-            }
+        if (audioRecommendationsOn) {
+            VvSectionHeader(tr("Recommended music", "موسيقى مقترحة"))
+            RecommendationRow(
+                items = recommendedAudio,
+                emptyMessage = recommendationEmptyMessage(audioQuery, recommendationError, recommendationsLoading),
+                onClick = vm::openBrowser,
+            )
+        }
+
+        if (videoRecommendationsOn) {
+            VvSectionHeader(tr("Recommended videos", "فيديوهات مقترحة"))
+            RecommendationRow(
+                items = recommendedVideos,
+                emptyMessage = recommendationEmptyMessage(videoQuery, recommendationError, recommendationsLoading),
+                onClick = vm::openBrowser,
+            )
         }
 
         // ---- recently played (the last files that were started)
-        val playedItems = remember(history, version) {
-            val byUri = history.associateBy { it.uri }
-            PlayLog.recent(ctx, 12).mapNotNull { byUri[it] }
-        }
         if (show["played"] == true && playedItems.isNotEmpty()) {
             VvSectionHeader(tr("Recently played", "تم تشغيله مؤخرًا"))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(Vv.md)) {
@@ -228,12 +302,41 @@ fun HomeTab(vm: DownloaderViewModel) {
 }
 
 private fun sectionName(id: String) = when (id) {
-    "videos" -> L.t("Videos", "الفيديوهات")
+    "recommend_audio" -> L.t("Recommended music", "موسيقى مقترحة")
+    "recommend_video" -> L.t("Recommended videos", "فيديوهات مقترحة")
     "shortcuts" -> L.t("Shortcuts", "الاختصارات")
     "recent" -> L.t("Recently downloaded", "التنزيلات الأخيرة")
     "played" -> L.t("Recently played", "تم تشغيله مؤخرًا")
     "smart" -> L.t("Smart playlists", "قوائم تشغيل ذكية")
     else -> L.t("Your library", "مكتبتك")
+}
+
+private fun recommendationEmptyMessage(query: String, failed: Boolean, loading: Boolean): String = when {
+    failed -> L.t("Recommendations are temporarily unavailable.", "التوصيات غير متاحة مؤقتًا.")
+    query.isBlank() -> L.t("Play or save music or videos to get recommendations.", "شغّل أو احفظ موسيقى أو فيديوهات للحصول على توصيات.")
+    loading -> L.t("Searching for recommendations…", "جارٍ البحث عن توصيات…")
+    else -> L.t("No recommendations found.", "لم يتم العثور على توصيات.")
+}
+
+@Composable
+private fun RecommendationRow(items: List<FeedItem>, emptyMessage: String, onClick: (String) -> Unit) {
+    if (items.isEmpty()) {
+        Text(emptyMessage, color = Muted, fontSize = VvText.caption)
+        return
+    }
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(Vv.md)) {
+        items(items.take(12), key = { it.url }) { item ->
+            Column(
+                Modifier.width(150.dp).clip(RoundedCornerShape(Vv.rMedium))
+                    .clickable(role = Role.Button) { onClick(item.url) },
+                verticalArrangement = Arrangement.spacedBy(Vv.xs),
+            ) {
+                RemoteThumb(item.thumbUrl, Modifier.size(width = 150.dp, height = 88.dp).clip(RoundedCornerShape(Vv.rMedium)))
+                Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, fontSize = VvText.body)
+                Text(item.uploader, color = Muted, fontSize = VvText.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
 }
 
 

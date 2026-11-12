@@ -33,13 +33,15 @@ import java.security.MessageDigest
 /**
  * The picture of a saved file.
  *  - video: a frame of the video;
- *  - audio: the cover that is inside the file; when there is none, a photo of the ARTIST (looked up once on Deezer's
- *    public search and then kept on the phone), and only when nothing is found the branded tile.
- * Only the artist's NAME is sent to the lookup; it can be switched off in Settings -> Behavior ("Artist pictures").
+ *  - audio: the embedded cover; then a matching Deezer album cover and artist photo; finally the branded tile.
+ * The online lookups can be switched off in Settings -> Behavior ("Artist pictures").
  */
 object TrackArt {
     private val mem = LruCache<String, Bitmap>(80)
     private val noArt = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val quranTerms = Regex("""(?i)(?<![a-z0-9])(qur['’]?an|surah?|recitation|tilawah|tilawat|qari|ayat|ayah)(?![a-z0-9])""")
+    private val arabicQuranTerms = Regex("القرآن|قرآن|تلاوة|ترتيل|سورة|سوره|آيات|آية|المصحف")
+    @Volatile private var standardQuranCover: Bitmap? = null
 
     fun enabled(ctx: Context) = Prefs.bool(ctx, "artist_art", true)
 
@@ -47,27 +49,54 @@ object TrackArt {
     fun load(ctx: Context, item: HistoryItem): Bitmap? {
         mem.get(item.uri)?.let { return it }
         if (item.uri in noArt) return null
-        val bmp = if (item.format == "MP3") audioArt(ctx, item) else VideoThumbs.load(ctx, item.uri)
+        val bmp = when {
+            isQuranRecitation(item.name, item.sourceUrl) -> quranCover(ctx)
+            item.format == "MP3" -> audioArt(ctx, item)
+            else -> VideoThumbs.load(ctx, item.uri)
+        }
         if (bmp != null) mem.put(item.uri, bmp) else if (item.format == "MP3") noArt.add(item.uri)
         return bmp
     }
 
     private fun audioArt(ctx: Context, item: HistoryItem): Bitmap? {
         var tagArtist: String? = null
+        var tagTitle: String? = null
+        var tagAlbum: String? = null
+        var embedded: ByteArray? = null
         val r = MediaMetadataRetriever()
         try {
             r.setDataSource(ctx, Uri.parse(item.uri))
-            r.embeddedPicture?.let { bytes -> decode(bytes)?.let { return it } }
+            embedded = r.embeddedPicture
             tagArtist = (r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST)
                 ?: r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST))?.takeIf { it.isNotBlank() }
+            tagTitle = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)?.takeIf { it.isNotBlank() }
+            tagAlbum = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)?.takeIf { it.isNotBlank() }
         } catch (_: Exception) {
             // an unreadable file simply has no cover
         } finally {
             runCatching { r.release() }
         }
+        if (isQuranRecitation(item.name, item.sourceUrl, tagTitle, tagAlbum, tagArtist)) return quranCover(ctx)
+        embedded?.let { decode(it)?.let { cover -> return cover } }
         if (!enabled(ctx)) return null
         val artist = (tagArtist ?: artistFromName(item.name)) ?: return null
+        val title = tagTitle ?: item.name.substringAfter(" - ", "").takeIf { it.isNotBlank() }?.let(::prettyName)
+        if (title != null) trackPicture(ctx, artist, title)?.let { return it }
         return artistPicture(ctx, artist)
+    }
+
+    private fun isQuranRecitation(vararg values: String?): Boolean =
+        values.filterNotNull().any { quranTerms.containsMatchIn(it) || arabicQuranTerms.containsMatchIn(it) }
+
+    private fun quranCover(ctx: Context): Bitmap? {
+        standardQuranCover?.let { return it }
+        return synchronized(this) {
+            standardQuranCover ?: BitmapFactory.decodeResource(
+                ctx.resources,
+                R.drawable.quran_cover,
+                BitmapFactory.Options().apply { inSampleSize = 4 },
+            )?.also { standardQuranCover = it }
+        }
     }
 
     /** "Artist - Title.mp3" -> "Artist" (first artist only); null when the name has no such pattern. */
@@ -107,6 +136,38 @@ object TrackArt {
             decode(bytes)
         } catch (_: Exception) {
             null       // offline: tried again next time
+        }
+    }
+
+    /** A track result is used only when Deezer reports the exact same artist. */
+    private fun trackPicture(ctx: Context, artist: String, title: String): Bitmap? {
+        val dir = File(ctx.cacheDir, "track_art").apply { mkdirs() }
+        val img = File(dir, "${key("$artist $title")}.jpg")
+        if (img.isFile) {
+            runCatching { BitmapFactory.decodeFile(img.path) }.getOrNull()?.let { return it }
+            img.delete()
+        }
+        return try {
+            val q = URLEncoder.encode("artist:\"$artist\" track:\"$title\"", "UTF-8")
+            val bytes = get("https://api.deezer.com/search/track?q=$q&limit=10", 300_000) ?: return null
+            val arr = JSONObject(String(bytes, Charsets.UTF_8)).optJSONArray("data") ?: return null
+            val want = norm(artist)
+            val wantTitle = norm(title)
+            for (i in 0 until arr.length()) {
+                val track = arr.optJSONObject(i) ?: continue
+                if (norm(track.optJSONObject("artist")?.optString("name").orEmpty()) != want) continue
+                val foundTitle = norm(track.optString("title"))
+                if (!foundTitle.contains(wantTitle) && !wantTitle.contains(foundTitle)) continue
+                val album = track.optJSONObject("album") ?: continue
+                val cover = album.optString("cover_xl").ifBlank { album.optString("cover_big") }
+                if (!cover.startsWith("https://")) continue
+                val art = download(cover) ?: continue
+                img.writeBytes(art)
+                return decode(art)
+            }
+            null
+        } catch (_: Exception) {
+            null
         }
     }
 

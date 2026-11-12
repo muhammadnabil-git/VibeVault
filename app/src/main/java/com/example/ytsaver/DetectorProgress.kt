@@ -99,7 +99,7 @@ private fun StepDot(step: Step, size: Dp = 16.dp) {
     }
 }
 
-/** The usage bar and "Used · remaining" line of one engine; shared by the progress card and Settings → Detector Consumption. */
+/** The usage bar and "Used · remaining" line of one engine; shared by the progress card and Settings → Radar Usage. */
 @Composable
 fun QuotaUsage(s: QuotaSpec) {
     val remaining = QuotaStore.remaining(s)

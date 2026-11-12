@@ -19,8 +19,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * The Music Detector's own settings: which recognition engines may be asked, and whether the live progress card is
- * shown on the Detector screen. Stored on this device. "All" (the default) asks every engine in tier order.
+ * Radar settings: which recognition engines may be asked, and whether the live progress card is shown. Stored on
+ * this device. "All" (the default) asks every engine in tier order.
  */
 object DetectorPrefs {
     private const val KEY_ENGINES = "detector_engines"     // "all" or a comma-separated list of engine names
@@ -82,12 +82,12 @@ object DetectorPrefs {
     }
 }
 
-/** The body of Settings → Detector Consumption: use all engines or pick them one by one, with what is left of each allowance. */
+/** The body of Settings → Radar Usage: use all engines or pick them one by one, with what is left of each allowance. */
 @Composable
 fun DetectorConsumptionContent() {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
-            tr("The engines the Music Detector asks, one after the other in this order, until one finds the song. Allowance counts are kept on this device and may differ slightly from the services' own.",
+            tr("The engines Radar asks, one after the other in this order, until one finds the song. Allowance counts are kept on this device and may differ slightly from the services' own.",
                 "المحركات التي يسألها كاشف الموسيقى واحدًا بعد الآخر بهذا الترتيب حتى يجد أحدها الأغنية. تُحتسب الحصص على هذا الجهاز وقد تختلف قليلًا عن حسابات الخدمات نفسها."),
             color = Muted, fontSize = 12.sp,
         )

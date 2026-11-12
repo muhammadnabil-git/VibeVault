@@ -40,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -50,7 +52,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         LiveWallpaper.init(applicationContext)
         SearchEngines.init(applicationContext)
-        handleIntent(intent)
+        handleIntent(intent, coldStart = true)
         setContent {
             val ar by vm.ar.collectAsStateWithLifecycle()
             val light by vm.lightMode.collectAsStateWithLifecycle()
@@ -62,7 +64,16 @@ class MainActivity : ComponentActivity() {
                 LocalAr provides ar,
                 LocalLayoutDirection provides if (ar) LayoutDirection.Rtl else LayoutDirection.Ltr,
             ) {
-                MaterialTheme(colorScheme = animatedScheme(if (themeId == THEME_WALLPAPER) wallpaperScheme(light) else schemeFor(themeId, light))) {
+                MaterialTheme(
+                    colorScheme = animatedScheme(if (themeId == THEME_WALLPAPER) wallpaperScheme(light) else schemeFor(themeId, light)),
+                    shapes = Shapes(
+                        extraSmall = RoundedCornerShape(10.dp),
+                        small = RoundedCornerShape(14.dp),
+                        medium = RoundedCornerShape(18.dp),
+                        large = RoundedCornerShape(24.dp),
+                        extraLarge = RoundedCornerShape(30.dp),
+                    ),
+                ) {
                     SystemBarsEffect(light)
                     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                         Box(Modifier.fillMaxSize()) {
@@ -83,7 +94,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIntent(intent)
+        handleIntent(intent, coldStart = false)
     }
 
     override fun onStart() {
@@ -99,7 +110,50 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Tapping the "download complete" notification opens the History tab (and the file details for groups). */
-    private fun handleIntent(i: Intent?) {
+    private fun handleIntent(i: Intent?, coldStart: Boolean) {
+        val authLink = i?.dataString?.takeIf {
+            i?.data?.host == "mediasaver-c3ee7.firebaseapp.com" &&
+                i?.data?.path?.startsWith("/__/auth/links") == true
+        }
+        if (!authLink.isNullOrBlank()) {
+            i.data = null
+            lifecycleScope.launch {
+                try {
+                    when (VaultRecovery.completeEmailLink(applicationContext, authLink)) {
+                        RecoveryLinkPurpose.SETUP -> {
+                            val hasPin = VaultStore.hasPin(applicationContext)
+                            if (!hasPin) {
+                                if (coldStart) {
+                                    VaultStore.screenOpen.value = true
+                                    vm.openSettings()
+                                }
+                                android.widget.Toast.makeText(
+                                    this@MainActivity,
+                                    L.t("Recovery email verified. Set your vault PIN.", "تم تأكيد بريد الاسترداد. عيّن رمز الخزنة."),
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        }
+                        RecoveryLinkPurpose.RESET -> {
+                            VaultStore.authorizePinReset()
+                            vm.openSettings()
+                            android.widget.Toast.makeText(
+                                this@MainActivity,
+                                L.t("Recovery email verified. Choose a new vault PIN.", "تم تأكيد بريد الاسترداد. اختر رمزًا جديدًا للخزنة."),
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                        null -> Unit
+                    }
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(
+                        this@MainActivity,
+                        e.message ?: "The recovery link could not be verified.",
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
         if (i != null && i.getBooleanExtra(EXTRA_BT_OPEN, false)) {
             // started by a Bluetooth device connecting: show the player as soon as the first track is ready
             vm.requestOpenPlayerWhenReady()
@@ -260,7 +314,7 @@ fun App(vm: DownloaderViewModel) {
             if (queue.isNotEmpty()) {
                 MiniPlayer(onOpen = vm::openPlayer, onStop = vm::stopPlayback)
             }
-            BottomTabs(false, false, vm)
+            if (Prefs.showHomeLibraryTabs(ctx)) BottomTabs(false, false, vm)
         } else {
             // ---- a page opened from VV: its own window with a back arrow; Back (button or gesture) returns to VV
             BackHandler { vm.setTab(4) }
@@ -309,6 +363,7 @@ fun App(vm: DownloaderViewModel) {
             if (queue.isNotEmpty()) {
                 MiniPlayer(onOpen = vm::openPlayer, onStop = vm::stopPlayback)
             }
+            if (tab == 2 && Prefs.showMediaLibraryTabs(ctx)) BottomTabs(false, false, vm)
         }
     }
 
