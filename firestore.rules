@@ -1,0 +1,52 @@
+rules_version = '2';
+
+// Media Saver: every signed-in user can read and write ONLY their own data, under users/<their uid>/.
+// Nothing else in the database is reachable, signed in or not.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      // (the document itself: older app versions kept their data in it)
+      allow read, write: if isOwner(uid);
+
+      match /playlists/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.name is string && request.resource.data.name.size() <= 200
+          && request.resource.data.entries is list;
+      }
+
+      match /favorites/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.page is string
+          && request.resource.data.title is string;
+      }
+
+      match /btRules/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && request.resource.data.pl is string;
+      }
+
+      match /tombstones/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && request.resource.data.k is string;
+      }
+
+      match /meta/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.json is string && request.resource.data.json.size() < 100000;
+      }
+    }
+
+    // everything else: closed
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
