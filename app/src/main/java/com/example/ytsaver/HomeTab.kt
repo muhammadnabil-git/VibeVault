@@ -276,7 +276,7 @@ private fun RecommendationRow(
         return
     }
     LazyRow(horizontalArrangement = Arrangement.spacedBy(Vv.md)) {
-        items(items.take(12), key = { it.url }) { item ->
+        items(items.take(17), key = { it.url }) { item ->
             var menuOpen by remember(item.url) { mutableStateOf(false) }
             var addToPlaylistOpen by remember(item.url) { mutableStateOf(false) }
             val youtubeUrl = LinkResolver.youtubeVideoUrlFromMusic(item.url)

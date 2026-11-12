@@ -48,7 +48,7 @@ object RecommendationActivity {
         val groups = if (audio) {
             listOf(searchTopics, playedTopics, savedTopics)
         } else {
-            listOf(playedTopics, savedTopics, searchTopics)
+            listOf(searchTopics + playedTopics + savedTopics)
         }
         val results = mutableListOf<String>()
         val seen = mutableSetOf<String>()
@@ -62,6 +62,15 @@ object RecommendationActivity {
             index++
         }
         return results.take(limit)
+    }
+
+    fun artistKey(item: FeedItem): String {
+        val uploader = item.uploader.substringBefore(" • ").trim()
+        val knownArtist = uploader.takeIf {
+            it.isNotBlank() && normalize(it) !in setOf("various artists", "unknown", "unknown artist")
+        }
+        val artist = knownArtist ?: TrackArt.artistFromName(item.title).ifBlank { item.title }
+        return normalize(artist)
     }
 
     private fun normalize(value: String) =

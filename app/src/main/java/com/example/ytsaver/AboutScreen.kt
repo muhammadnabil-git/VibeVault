@@ -28,7 +28,7 @@ fun AboutSection() {
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Image(painterResource(R.drawable.ic_logo_vv), contentDescription = "VibeVault", modifier = Modifier.size(64.dp))
+            Image(painterResource(R.drawable.vv_logo_icon), contentDescription = "VibeVault", modifier = Modifier.size(64.dp))
             Column {
                 Text("VibeVault", fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Text(tr("Save. Organize. Play.", "احفظ. نظّم. شغّل."), color = Muted)

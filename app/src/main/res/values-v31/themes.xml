@@ -6,6 +6,6 @@
         <item name="android:navigationBarColor">@color/vv_midnight</item>
         <!-- Android 12+ system splash screen: the VV emblem on midnight navy -->
         <item name="android:windowSplashScreenBackground">@color/vv_midnight</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/vv_logo_icon</item>
     </style>
 </resources>

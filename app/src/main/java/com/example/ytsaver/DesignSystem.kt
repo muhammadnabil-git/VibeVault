@@ -81,11 +81,11 @@ object VvText {
     val caption = 12.sp
 }
 
-/** The VV emblem; picks the variant that reads best on the current (dark or light) surface. */
+/** The VibeVault app mark. */
 @Composable
 fun VvLogo(size: Dp = 40.dp, modifier: Modifier = Modifier) {
     Image(
-        painter = painterResource(if (ThemeState.light) R.drawable.ic_logo_vv_light else R.drawable.ic_logo_vv),
+        painter = painterResource(R.drawable.vv_logo_icon),
         contentDescription = "VibeVault",
         modifier = modifier.size(size),
     )

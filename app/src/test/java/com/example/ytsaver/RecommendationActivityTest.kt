@@ -13,33 +13,57 @@ class RecommendationActivityTest {
     }
 
     @Test
-    fun regionalVideoRecommendationsLeadAndOutnumberPersonalizedResults() {
+    fun personalizedVideoRecommendationsLeadAndRegionalResultsFillRemainingSlots() {
         val regional = (1..9).map { recommendation("regional-$it", "regional") }
         val personalized = (1..3).map { recommendation("personalized-$it", "personalized") }
 
-        val ranked = prioritizeRegionalRecommendations(regional, personalized)
+        val ranked = prioritizePersonalizedRecommendations(personalized, regional)
 
         assertEquals(
             listOf(
-                "regional-1", "regional-2", "regional-3", "personalized-1",
-                "regional-4", "regional-5", "regional-6", "personalized-2",
-                "regional-7", "regional-8", "regional-9", "personalized-3",
+                "personalized-1", "personalized-2", "personalized-3",
+                "regional-1", "regional-2", "regional-3", "regional-4",
+                "regional-5", "regional-6", "regional-7", "regional-8", "regional-9",
             ),
             ranked.map { it.title },
         )
     }
 
     @Test
-    fun regionalVideoRecommendationsDeduplicateByVideo() {
+    fun recommendationSectionsReturnAtMostSeventeenVideos() {
+        val personalized = (1..20).map { recommendation("personalized-$it", "personalized") }
+
+        assertEquals(17, prioritizePersonalizedRecommendations(personalized, emptyList()).size)
+    }
+
+    @Test
+    fun videoRecommendationsDeduplicateByVideo() {
         val regional = listOf(recommendation("abcdefghijk", "regional"))
         val personalized = listOf(
             FeedItem("https://youtu.be/abcdefghijk?feature=shared", "duplicate", "", 0L, null),
             recommendation("personalized-1", "personalized"),
         )
 
-        val ranked = prioritizeRegionalRecommendations(regional, personalized)
+        val ranked = prioritizePersonalizedRecommendations(personalized, regional)
 
-        assertEquals(listOf("abcdefghijk", "personalized-1"), ranked.map { it.title })
+        assertEquals(listOf("duplicate", "personalized-1"), ranked.map { it.title })
+    }
+
+    @Test
+    fun musicRecommendationsCanBeInterleavedByDistinctArtist() {
+        val items = listOf(
+            recommendation("music-one", "Artist One").copy(uploader = "Artist One"),
+            recommendation("music-two", "Artist One").copy(uploader = "Artist One"),
+            recommendation("music-three", "Artist Two").copy(uploader = "Artist Two"),
+        )
+
+        val distinct = interleaveRecommendationResults(
+            results = listOf(items),
+            limit = 17,
+            distinctKey = RecommendationActivity::artistKey,
+        )
+
+        assertEquals(listOf("music-one", "music-three"), distinct.map { it.title })
     }
 
     @Test
@@ -69,9 +93,26 @@ class RecommendationActivityTest {
         assertTrue(videoTopics.contains("Played Channel - Clip"))
         assertTrue(videoTopics.contains("Downloaded Channel - Video"))
         assertEquals(
-            listOf("Played Channel - Clip", "Downloaded Channel - Video", "Searched Topic"),
+            listOf("Searched Topic", "Played Channel - Clip", "Downloaded Channel - Video"),
             videoTopics.take(3),
         )
+    }
+
+    @Test
+    fun recentVideoSearchesTakePriorityOverPlaybackAndDownloads() {
+        val savedVideo = video("Downloaded Channel - Video.mp4", "saved-video")
+        val playedVideo = video("Played Channel - Clip.mp4", "played-video")
+        val recentSearches = listOf("Search One", "Search Two", "Search Three", "Search Four", "Search Five")
+
+        val topics = RecommendationActivity.topics(
+            searches = recentSearches,
+            history = listOf(savedVideo, playedVideo),
+            playedUris = listOf(playedVideo.uri),
+            audio = false,
+            limit = 5,
+        )
+
+        assertEquals(recentSearches, topics)
     }
 
     private fun audio(name: String, uri: String) = HistoryItem(name, "MP3", 0, 0, 1, "", uri, "")

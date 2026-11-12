@@ -89,52 +89,40 @@ fun interleaveResults(results: Map<String, List<FeedItem>>): List<FeedItem> {
     return out.distinctBy { it.url }
 }
 
-fun interleaveRecommendationResults(results: List<List<FeedItem>>, limit: Int = 12): List<FeedItem> {
+fun interleaveRecommendationResults(
+    results: List<List<FeedItem>>,
+    limit: Int = 17,
+    distinctKey: (FeedItem) -> String = { sourceId(it.url) },
+): List<FeedItem> {
     val out = mutableListOf<FeedItem>()
     val seen = mutableSetOf<String>()
     var index = 0
     while (out.size < limit && results.any { index < it.size }) {
         results.forEach { list ->
             val item = list.getOrNull(index) ?: return@forEach
-            if (seen.add(sourceId(item.url))) out += item
+            val key = distinctKey(item).ifBlank { sourceId(item.url) }
+            if (seen.add(key)) out += item
         }
         index++
     }
     return out.take(limit)
 }
 
-/** Keeps regional picks in three of every four positions, using personal activity to add variety. */
-fun prioritizeRegionalRecommendations(
-    regional: List<FeedItem>,
+/** Keeps search-based recommendations first and uses regional picks only to fill remaining slots. */
+fun prioritizePersonalizedRecommendations(
     personalized: List<FeedItem>,
-    limit: Int = 12,
-    regionalPerPersonalized: Int = 3,
+    regional: List<FeedItem>,
+    limit: Int = 17,
 ): List<FeedItem> {
+    if (limit <= 0) return emptyList()
     val out = mutableListOf<FeedItem>()
-    val seen = mutableSetOf<String>()
-    var regionalIndex = 0
-    var personalizedIndex = 0
-
-    fun appendNext(items: List<FeedItem>, index: Int): Int {
-        var next = index
-        while (next < items.size) {
-            val item = items[next++]
-            if (seen.add(sourceId(item.url))) {
-                out += item
-                break
-            }
-        }
-        return next
-    }
-
-    while (out.size < limit && (regionalIndex < regional.size || personalizedIndex < personalized.size)) {
-        repeat(regionalPerPersonalized.coerceAtLeast(1)) {
-            if (out.size < limit && regionalIndex < regional.size) {
-                regionalIndex = appendNext(regional, regionalIndex)
-            }
-        }
-        if (out.size < limit && personalizedIndex < personalized.size) {
-            personalizedIndex = appendNext(personalized, personalizedIndex)
+    val seenIds = mutableSetOf<String>()
+    val seenTitles = mutableSetOf<String>()
+    for (item in personalized + regional) {
+        val title = item.title.lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()
+        if (seenIds.add(sourceId(item.url)) && (title.isBlank() || seenTitles.add(title))) {
+            out += item
+            if (out.size == limit) break
         }
     }
     return out

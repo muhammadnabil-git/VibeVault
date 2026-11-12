@@ -620,7 +620,13 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
         val searches = RecommendationActivity.searches(app)
         val played = PlayLog.recent(app, 40)
         val musicTopics = RecommendationActivity.topics(searches, saved, played, audio = true)
-        val videoTopics = RecommendationActivity.topics(searches, saved, played, audio = false)
+        val videoTopics = RecommendationActivity.topics(
+            searches = searches.take(5),
+            history = saved,
+            playedUris = played,
+            audio = false,
+            limit = 5,
+        )
         val region = Locale.getDefault().country.takeIf { it.matches(Regex("[A-Za-z]{2}")) }?.uppercase(Locale.ROOT) ?: "US"
         val country = Locale("", region).getDisplayCountry(Locale.ENGLISH).ifBlank { region }
         val musicTrendingQuery = "Trending songs in $country"
@@ -657,30 +663,54 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
         recommendationJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 withTimeoutOrNull(20_000L) { DownloadEngine.state.first { it.engineReady } }
-                val (musicResults, regionalVideoResults, personalizedVideoResults) = coroutineScope {
-                    val music = async { searchRecommendationMusic(musicQueries, region) }
-                    val regionalVideos = async { searchRecommendationVideos(videoTrendingQueries, youtube, limit = 5) }
-                    val personalizedVideos = async { searchRecommendationVideos(personalizedVideoQueries, youtube) }
-                    Triple(music.await(), regionalVideos.await(), personalizedVideos.await())
-                }
-                var music = interleaveRecommendationResults(musicResults.filterNotNull())
+                var music = interleaveRecommendationResults(
+                    searchRecommendationMusic(musicQueries, region).filterNotNull(),
+                    distinctKey = RecommendationActivity::artistKey,
+                )
                     .filter { hostOf(it.url).contains("music.youtube.com") }
                     .map { it.copy(site = "YouTube Music", isAudio = true) }
-                val regionalVideos = interleaveRecommendationResults(regionalVideoResults.filterNotNull())
-                    .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
-                    .filter { RecommendationActivity.hasArabicMetadata(it) }
-                    .map { it.copy(site = "YouTube", isAudio = false) }
-                val personalizedVideos = interleaveRecommendationResults(personalizedVideoResults.filterNotNull())
-                    .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
-                    .filter { RecommendationActivity.hasArabicMetadata(it) }
-                    .map { it.copy(site = "YouTube", isAudio = false) }
-                val videos = prioritizeRegionalRecommendations(regionalVideos, personalizedVideos)
 
                 if (music.isEmpty() && musicQueries != listOf(musicTrendingQuery)) {
-                    music = interleaveRecommendationResults(searchRecommendationMusic(listOf(musicTrendingQuery), region).filterNotNull())
+                    music = interleaveRecommendationResults(
+                        searchRecommendationMusic(listOf(musicTrendingQuery), region).filterNotNull(),
+                        distinctKey = RecommendationActivity::artistKey,
+                    )
                         .filter { hostOf(it.url).contains("music.youtube.com") }
                         .map { it.copy(site = "YouTube Music", isAudio = true) }
                 }
+
+                _recommendations.update { current ->
+                    current.copy(
+                        music = music.ifEmpty { current.music.ifEmpty { listOf(musicFallback) } },
+                        musicFailed = music.isEmpty(),
+                        loading = true,
+                    )
+                }
+
+                warmRecommendationTracks(music)
+
+                val personalizedVideoResults = searchRecommendationVideos(personalizedVideoQueries, youtube)
+                val personalizedVideos = prioritizePersonalizedRecommendations(
+                    personalized = interleaveRecommendationResults(
+                        personalizedVideoResults.filterNotNull(),
+                        limit = 25,
+                    )
+                        .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
+                        .map { it.copy(site = "YouTube", isAudio = false) },
+                    regional = emptyList(),
+                )
+                val regionalVideos = if (personalizedVideos.size < 17) {
+                    interleaveRecommendationResults(
+                        searchRecommendationVideos(videoTrendingQueries, youtube, limit = 20).filterNotNull(),
+                        limit = 20,
+                    )
+                        .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
+                        .filter { RecommendationActivity.hasArabicMetadata(it) }
+                        .map { it.copy(site = "YouTube", isAudio = false) }
+                } else {
+                    emptyList()
+                }
+                val videos = prioritizePersonalizedRecommendations(personalizedVideos, regionalVideos)
 
                 _recommendations.update { current ->
                     current.copy(
@@ -705,6 +735,24 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
                 }
             }
         }
+    }
+
+    private suspend fun warmRecommendationTracks(items: List<FeedItem>) = coroutineScope {
+        items.mapNotNull { LinkResolver.youtubeVideoUrlFromMusic(it.url) }
+            .distinct()
+            .take(2)
+            .map { url ->
+                async {
+                    try {
+                        FeedLoader.playableStream(url, audio = true)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+            }
+            .forEach { it.await() }
     }
 
     private suspend fun searchRecommendationMusic(queries: List<String>, region: String): List<List<FeedItem>?> =

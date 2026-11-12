@@ -1109,7 +1109,14 @@ fun FavoritesScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 if (selectMode) Checkbox(checked = picked, onCheckedChange = { toggle() })
-                                FavoriteCover(e, Modifier.size(width = 96.dp, height = 54.dp).clip(RoundedCornerShape(8.dp)), 20.dp)
+                                FavoriteCover(
+                                    e,
+                                    Modifier.size(
+                                        width = if (e.format == "MP3") 96.dp else 150.dp,
+                                        height = if (e.format == "MP3") 54.dp else 88.dp,
+                                    ).clip(RoundedCornerShape(8.dp)),
+                                    20.dp,
+                                )
                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text(e.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     Text(
