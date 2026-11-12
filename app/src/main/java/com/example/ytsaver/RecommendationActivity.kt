@@ -69,7 +69,7 @@ object RecommendationActivity {
         val knownArtist = uploader.takeIf {
             it.isNotBlank() && normalize(it) !in setOf("various artists", "unknown", "unknown artist")
         }
-        val artist = knownArtist ?: TrackArt.artistFromName(item.title).ifBlank { item.title }
+        val artist = knownArtist ?: TrackArt.artistFromName(item.title).orEmpty().ifBlank { item.title }
         return normalize(artist)
     }
 

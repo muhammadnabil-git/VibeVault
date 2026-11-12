@@ -1112,8 +1112,8 @@ fun FavoritesScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                                 FavoriteCover(
                                     e,
                                     Modifier.size(
-                                        width = if (e.format == "MP3") 96.dp else 150.dp,
-                                        height = if (e.format == "MP3") 54.dp else 88.dp,
+                                        width = if (e.isAudio) 96.dp else 150.dp,
+                                        height = if (e.isAudio) 54.dp else 88.dp,
                                     ).clip(RoundedCornerShape(8.dp)),
                                     20.dp,
                                 )
