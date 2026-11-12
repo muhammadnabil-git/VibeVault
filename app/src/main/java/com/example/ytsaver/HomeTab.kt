@@ -33,6 +33,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -146,6 +147,8 @@ fun HomeTab(vm: DownloaderViewModel) {
             RecommendationRow(
                 items = recommendations.music,
                 loading = recommendations.loading,
+                prefetchPlayableTracks = true,
+                onAddToNowPlaying = { entry -> vm.enqueuePlaylists(listOf(entry)) },
                 onClick = { item ->
                     val videoUrl = LinkResolver.youtubeVideoUrlFromMusic(item.url)
                     if (videoUrl != null) vm.playEntries(listOf(item.copy(url = videoUrl).toEntry()))
@@ -258,6 +261,8 @@ private fun sectionName(id: String) = when (id) {
 private fun RecommendationRow(
     items: List<FeedItem>,
     loading: Boolean,
+    prefetchPlayableTracks: Boolean = false,
+    onAddToNowPlaying: ((PlEntry) -> Unit)? = null,
     onClick: (FeedItem) -> Unit,
     onDownload: (FeedItem) -> Unit,
 ) {
@@ -274,7 +279,16 @@ private fun RecommendationRow(
         items(items.take(12), key = { it.url }) { item ->
             var menuOpen by remember(item.url) { mutableStateOf(false) }
             var addToPlaylistOpen by remember(item.url) { mutableStateOf(false) }
-            val hasYoutubeMusicTrack = item.isAudio && LinkResolver.youtubeVideoUrlFromMusic(item.url) != null
+            val youtubeUrl = LinkResolver.youtubeVideoUrlFromMusic(item.url)
+            val playlistEntry = remember(item.url, item.title, item.uploader, youtubeUrl) {
+                item.copy(url = youtubeUrl ?: item.url).toEntry()
+            }
+            val hasYoutubeMusicTrack = item.isAudio && youtubeUrl != null
+            if (prefetchPlayableTracks && hasYoutubeMusicTrack) {
+                LaunchedEffect(youtubeUrl) {
+                    youtubeUrl?.let { FeedLoader.prefetchPlayableStream(it, audio = true) }
+                }
+            }
             Column(Modifier.width(150.dp), verticalArrangement = Arrangement.spacedBy(Vv.xs)) {
                 Box {
                     RecommendationArtwork(
@@ -290,7 +304,7 @@ private fun RecommendationRow(
                             }
                             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                 DropdownMenuItem(
-                                    text = { Text(tr("Add to online playlist", "إضافة إلى قائمة تشغيل عبر الإنترنت")) },
+                                    text = { Text(tr("Add to playlist", "إضافة إلى قائمة تشغيل")) },
                                     onClick = {
                                         menuOpen = false
                                         addToPlaylistOpen = true
@@ -314,7 +328,8 @@ private fun RecommendationRow(
             }
             if (addToPlaylistOpen) {
                 AddToPlaylistDialog(
-                    entries = listOf(item.toEntry()),
+                    entries = listOf(playlistEntry),
+                    onNowPlaying = onAddToNowPlaying?.let { add -> { add(playlistEntry) } },
                     allowedKinds = setOf(KIND_ONLINE),
                 ) { addToPlaylistOpen = false }
             }

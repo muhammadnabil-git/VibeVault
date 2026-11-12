@@ -1186,10 +1186,10 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
         viewModelScope.launch(Dispatchers.IO) {
             HistoryStore.load(app)
             NotificationStore.load(app)
-            if (DownloadEngine.ensureInit(app)) {
-                // every time the app is opened: bring the download engine up to date automatically
+            if (DownloadEngine.ensureInit(app) && Prefs.engineStale(app)) {
+                // Avoid replacing the engine on every launch; streaming and downloads use it too.
                 if (DownloadEngine.updateEngine(app, auto = true)) Prefs.setFirstUpdateDone(app)
-                else if (Prefs.engineStale(app)) {
+                else {
                     NotificationStore.addOnce(
                         app, "ENGINE_NEEDS_UPDATE",
                         L.t("Engine update recommended", "يُنصح بتحديث المحرك"),

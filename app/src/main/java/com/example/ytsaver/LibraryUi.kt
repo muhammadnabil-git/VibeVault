@@ -163,9 +163,6 @@ fun AddToPlaylistDialog(
         title = { Text(tr("Add to playlist", "إضافة إلى قائمة تشغيل")) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (visiblePlaylists.isEmpty() && !creating) {
-                    Text(tr("No compatible playlists yet. Create one:", "لا توجد قوائم متوافقة بعد. أنشئ واحدة:"), color = Muted)
-                }
                 if (onNowPlaying != null) {
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { onNowPlaying(); onDismiss() }.padding(vertical = 8.dp, horizontal = 4.dp),
@@ -175,6 +172,9 @@ fun AddToPlaylistDialog(
                         Spacer(Modifier.width(10.dp))
                         Text(tr("Add to now playing", "إضافة إلى التشغيل الحالي"), fontWeight = FontWeight.SemiBold)
                     }
+                }
+                if (visiblePlaylists.isEmpty() && !creating) {
+                    Text(tr("No compatible playlists yet. Create one:", "لا توجد قوائم متوافقة بعد. أنشئ واحدة:"), color = Muted)
                 }
                 visiblePlaylists.forEach { p ->
                     val ok = entries.any { accepts(p.kind, it) }

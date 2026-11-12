@@ -11,6 +11,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,13 +46,21 @@ object PlayerHolder {
     @Synchronized
     fun get(ctx: Context): ExoPlayer {
         player?.let { return it }
-        val http = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true)
+        val http = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(30_000)
         val upstream = ResolvingDataSource.Factory(DefaultDataSource.Factory(ctx.applicationContext, http)) { spec ->
             val h = streamHeaders[spec.uri.toString()]
             if (h != null) spec.withAdditionalHeaders(h) else spec
         }
         val p = ExoPlayer.Builder(ctx.applicationContext)
             .setMediaSourceFactory(DefaultMediaSourceFactory(upstream))
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(50_000, 120_000, 1_500, 10_000)
+                    .build(),
+            )
             .setAudioAttributes(MEDIA_ATTRIBUTES, true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)       // keeps the CPU and Wi-Fi awake while a stream plays with the screen off

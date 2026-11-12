@@ -4,11 +4,15 @@ import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import android.graphics.Bitmap
 import android.util.Base64
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,6 +21,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
 
 /** One search result in the Search tab. */
 data class FeedItem(
@@ -135,9 +142,18 @@ fun prioritizeRegionalRecommendations(
 object FeedLoader {
     private const val WEB_UA =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    private const val PLAYABLE_STREAM_CACHE_MS = 15 * 60_000L
 
     // searches run in their own scope: a slow website is given up on without waiting for its blocking call to return
     private val searchScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val playbackScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val playbackPrefetchPermits = Semaphore(2)
+    private val playbackPrefetchKeys = ConcurrentHashMap.newKeySet<String>()
+    private val playbackResolutions = ConcurrentHashMap<String, CompletableFuture<StreamInfo?>>()
+    private val playableStreamLock = Any()
+    private val playableStreamCache = object : LinkedHashMap<String, Pair<Long, StreamInfo>>(16, 0.75f, true) {
+        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, Pair<Long, StreamInfo>>?) = size > 40
+    }
 
     private fun timeoutMs(spec: SiteSpec): Long = when {
         spec.prefix != null -> 35_000L          // the download engine (YouTube, SoundCloud)
@@ -428,10 +444,70 @@ object FeedLoader {
      * Used to play playlist links without downloading them.
      */
     fun playableStream(pageUrl: String, audio: Boolean): StreamInfo? {
+        val key = "${if (audio) "audio" else "video"}:$pageUrl"
+        cachedPlayableStream(key)?.let { return it }
+        val mine = CompletableFuture<StreamInfo?>()
+        val active = playbackResolutions.putIfAbsent(key, mine)
+        if (active != null) {
+            return try {
+                active.get()
+            } catch (e: ExecutionException) {
+                throw e.cause ?: e
+            }
+        }
+
+        try {
+            val stream = resolvePlayableStream(pageUrl, audio)
+            if (stream != null) synchronized(playableStreamLock) {
+                playableStreamCache[key] = System.currentTimeMillis() to stream
+            }
+            mine.complete(stream)
+            return stream
+        } catch (e: Exception) {
+            mine.completeExceptionally(e)
+            throw e
+        } finally {
+            playbackResolutions.remove(key, mine)
+        }
+    }
+
+    /** Resolve likely-to-be-played recommendations ahead of the tap, without blocking the Home screen. */
+    fun prefetchPlayableStream(pageUrl: String, audio: Boolean) {
+        val key = "${if (audio) "audio" else "video"}:$pageUrl"
+        if (cachedPlayableStream(key) != null || !playbackPrefetchKeys.add(key)) return
+        playbackScope.launch {
+            try {
+                playbackPrefetchPermits.withPermit { playableStream(pageUrl, audio) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("FeedLoader", "Recommendation stream prefetch failed", e)
+            } finally {
+                playbackPrefetchKeys.remove(key)
+            }
+        }
+    }
+
+    private fun cachedPlayableStream(key: String): StreamInfo? = synchronized(playableStreamLock) {
+        val cached = playableStreamCache[key] ?: return@synchronized null
+        if (System.currentTimeMillis() - cached.first >= PLAYABLE_STREAM_CACHE_MS) {
+            playableStreamCache.remove(key)
+            null
+        } else {
+            cached.second
+        }
+    }
+
+    private fun resolvePlayableStream(pageUrl: String, audio: Boolean): StreamInfo? {
         val req = YoutubeDLRequest(pageUrl).apply {
             addOption("--no-playlist")
-            addOption("--socket-timeout", "15")
-            addOption("-f", if (audio) "ba[ext=m4a]/ba/b" else "b[height<=720][ext=mp4]/b[height<=720]/b[ext=mp4]/b")
+            addOption("--socket-timeout", "10")
+            addOption("--retries", "2")
+            addOption("--extractor-retries", "2")
+            addOption("--fragment-retries", "2")
+            addOption("--no-check-formats")
+            addOption("--no-warnings")
+            addOption("-f", if (audio) "ba[ext=m4a]/ba" else "b[height<=720][ext=mp4]/b[height<=720]/b[ext=mp4]/b")
             addOption("-j")
         }
         val out: String = YoutubeDL.getInstance().execute(req, null, null).out ?: ""
