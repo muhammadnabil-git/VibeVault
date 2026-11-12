@@ -8,10 +8,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -253,7 +253,7 @@ private fun ItemsTab(vm: DownloaderViewModel, history: Boolean) {
                         modifier = Modifier.size(40.dp),
                     ) {
                         Icon(
-                            Icons.Filled.FilterList,
+                            painterResource(R.drawable.ic_filter_list),
                             contentDescription = tr("Filters", "عوامل التصفية"),
                             tint = if (filtersExpanded || activeCategory != "all" || effOrigin != 0 || effSite != null) MaterialTheme.colorScheme.primary else Muted,
                         )
