@@ -245,130 +245,99 @@ fun SettingsScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
             }
 
             // ---- behaviour ----
-            SettingsCard(tr("Behavior", "السلوك")) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Open Media when a download finishes", "فتح الوسائط عند اكتمال التنزيل"))
-                        Text(
-                            tr("Only while the app is open on screen.", "فقط أثناء فتح التطبيق على الشاشة."),
-                            color = Muted, fontSize = 12.sp,
-                        )
-                    }
-                    Switch(checked = autoHistory, onCheckedChange = vm::setAutoHistory)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Play video preview in Search", "تشغيل معاينة الفيديو في البحث"))
-                        Text(
-                            tr("Search results can be played inside their own card before you send them to Download.",
-                                "يمكن تشغيل نتائج البحث داخل بطاقتها قبل إرسالها إلى التنزيل."),
-                            color = Muted, fontSize = 12.sp,
-                        )
-                    }
-                    Switch(checked = searchPreview, onCheckedChange = vm::setSearchPreview)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Show video previews in Media and History", "عرض صور معاينة الفيديو في الوسائط والسجل"))
-                        Text(
-                            tr("A preview image on every row of the Video list.",
-                                "صورة معاينة في كل صف من قائمة الفيديو."),
-                            color = Muted, fontSize = 12.sp,
-                        )
-                    }
-                    Switch(checked = historyThumbs, onCheckedChange = vm::setHistoryThumbs)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    var artistArt by remember { mutableStateOf(TrackArt.enabled(ctx)) }
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Artist pictures", "صور الفنانين"))
-                        Text(
-                            tr("Songs without a cover show a photo of the artist. Only the artist's name is looked up online (Deezer), once, and the picture is kept on the phone.",
-                                "الأغاني بلا غلاف تعرض صورة الفنان. يُبحث عن اسم الفنان فقط عبر الإنترنت (Deezer) مرة واحدة وتُحفظ الصورة على الهاتف."),
-                            color = Muted, fontSize = 12.sp,
-                        )
-                    }
-                    Switch(checked = artistArt, onCheckedChange = { artistArt = it; Prefs.putBool(ctx, "artist_art", it) })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Resume where you left off", "استئناف من حيث توقفت"))
-                        Text(
-                            tr("A file you stopped in the middle starts again from that point.",
-                                "الملف الذي أوقفته في المنتصف يبدأ من النقطة نفسها."),
-                            color = Muted, fontSize = 12.sp,
-                        )
-                    }
-                    Switch(checked = resumePlayback, onCheckedChange = vm::setResumePlayback)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Undo after removing", "التراجع بعد الإزالة"))
-                        Text(
-                            tr("After removing items from the Media or History lists, a bar offers Undo for a few seconds.",
-                                "بعد إزالة عناصر من قوائم الوسائط أو السجل يظهر شريط للتراجع لثوانٍ."),
-                            color = Muted, fontSize = 12.sp,
-                        )
-                    }
-                    Switch(checked = undoDelete, onCheckedChange = vm::setUndoDelete)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Search and filter in the Media tab", "البحث والتصفية في تبويب الوسائط"))
-                        Text(
-                            tr("A search box and filters above the Media lists.",
-                                "مربع بحث ومرشحات فوق قوائم الوسائط."),
-                            color = Muted, fontSize = 12.sp,
-                        )
-                    }
-                    Switch(checked = librarySearch, onCheckedChange = vm::setLibrarySearch)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Search and filter in the History tab", "البحث والتصفية في تبويب السجل"))
-                        Text(
-                            tr("A search box and filters above the History list.",
-                                "مربع بحث ومرشحات فوق قائمة السجل."),
-                            color = Muted, fontSize = 12.sp,
-                        )
-                    }
-                    Switch(checked = historySearch, onCheckedChange = vm::setHistorySearch)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Show the source website", "إظهار الموقع المصدر"))
-                        Text(
-                            tr("A small site badge on every file, site filters, and Group by site in the Sort menu.",
-                                "شارة صغيرة للموقع على كل ملف، ومرشحات المواقع، وخيار التجميع حسب الموقع في قائمة الترتيب."),
-                            color = Muted, fontSize = 12.sp,
-                        )
-                    }
-                    Switch(checked = sourceSites, onCheckedChange = vm::setSourceSites)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Add title, artist and cover art to downloads", "إضافة العنوان والفنان وصورة الغلاف للتنزيلات"))
-                        Text(
-                            tr("Written into new downloads (cover art in MP3) so other music apps show them properly.",
-                                "تُكتب في التنزيلات الجديدة (صورة الغلاف في MP3) لتعرضها تطبيقات الموسيقى الأخرى بشكل صحيح."),
-                            color = Muted, fontSize = 12.sp,
-                        )
-                    }
-                    Switch(checked = embedMeta, onCheckedChange = vm::setEmbedMeta)
-                }
+            SettingsCard(tr("General behavior", "السلوك العام")) {
+                BehaviorSwitchRow(
+                    tr("Open Media when a download finishes", "فتح الوسائط عند اكتمال التنزيل"),
+                    tr("Only while the app is open on screen.", "فقط أثناء فتح التطبيق على الشاشة."),
+                    autoHistory, vm::setAutoHistory,
+                )
+                BehaviorSwitchRow(
+                    tr("Resume where you left off", "استئناف من حيث توقفت"),
+                    tr("A file you stopped in the middle starts again from that point.", "الملف الذي أوقفته في المنتصف يبدأ من النقطة نفسها."),
+                    resumePlayback, vm::setResumePlayback,
+                )
+                BehaviorSwitchRow(
+                    tr("Undo after removing", "التراجع بعد الإزالة"),
+                    tr("After removing items from the Media or History lists, a bar offers Undo for a few seconds.",
+                        "بعد إزالة عناصر من قوائم الوسائط أو السجل يظهر شريط للتراجع لثوانٍ."),
+                    undoDelete, vm::setUndoDelete,
+                )
+            }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(tr("Show the Music Detector progress card", "إظهار بطاقة تقدّم كاشف الموسيقى"))
-                        Text(
-                            tr("The live card under the listen button: the detection phases and each engine's state. The allowance counts stay in Settings → Detector Consumption.",
-                                "البطاقة الحية تحت زر الاستماع: مراحل الكشف وحالة كل محرك. تبقى أعداد الحصص في الإعدادات ← استهلاك الكاشف."),
-                            color = Muted, fontSize = 12.sp,
-                        )
-                    }
-                    Switch(checked = DetectorPrefs.showCard, onCheckedChange = { DetectorPrefs.changeShowCard(it) })
+            SettingsCard(tr("Media", "الوسائط")) {
+                BehaviorSwitchRow(
+                    tr("Search and filter in the Media tab", "البحث والتصفية في تبويب الوسائط"),
+                    tr("A search box and filters above the Media lists.", "مربع بحث ومرشحات فوق قوائم الوسائط."),
+                    librarySearch, vm::setLibrarySearch,
+                )
+                Text(tr("Media filters", "مرشحات الوسائط"), fontWeight = FontWeight.SemiBold)
+                categoryFilterSettings(ctx, history = false)
+                BehaviorSwitchRow(
+                    tr("Show video previews in Media and History", "عرض صور معاينة الفيديو في الوسائط والسجل"),
+                    tr("A preview image on every row of the Video list.", "صورة معاينة في كل صف من قائمة الفيديو."),
+                    historyThumbs, vm::setHistoryThumbs,
+                )
+                var artistArt by remember { mutableStateOf(TrackArt.enabled(ctx)) }
+                BehaviorSwitchRow(
+                    tr("Artist and album covers", "صور الفنانين والألبومات"),
+                    tr("When a track has no embedded cover, search Deezer, Apple Music, Last.fm, MusicBrainz and YouTube Music. Found artwork is saved on this device. Turn this off to skip online lookups.",
+                        "عند غياب غلاف داخل الملف، يُبحث عبر Deezer وApple Music وLast.fm وMusicBrainz وYouTube Music. تُحفظ الأغلفة التي يتم العثور عليها على هذا الجهاز. أوقف هذا الخيار لتعطيل البحث عبر الإنترنت."),
+                    artistArt,
+                ) {
+                    artistArt = it
+                    Prefs.putBool(ctx, "artist_art", it)
                 }
+                BehaviorSwitchRow(
+                    tr("Show the source website", "إظهار الموقع المصدر"),
+                    tr("Site badges, site filters, and Group by site in Media and History.",
+                        "شارة الموقع ومرشحاته وخيار التجميع حسب الموقع في الوسائط والسجل."),
+                    sourceSites, vm::setSourceSites,
+                )
+            }
 
+            SettingsCard(tr("History", "السجل")) {
+                BehaviorSwitchRow(
+                    tr("Search and filter in the History tab", "البحث والتصفية في تبويب السجل"),
+                    tr("A search box and filters above the History list.", "مربع بحث ومرشحات فوق قائمة السجل."),
+                    historySearch, vm::setHistorySearch,
+                )
+                Text(tr("History filters", "مرشحات السجل"), fontWeight = FontWeight.SemiBold)
+                categoryFilterSettings(ctx, history = true)
+            }
+
+            SettingsCard(tr("Recommendations", "التوصيات")) {
+                PreferenceSwitch(
+                    key = "home_recommendations_audio",
+                    title = tr("Recommended music", "الموسيقى المقترحة"),
+                    initial = Prefs.homeRecommendations(ctx, "audio"),
+                    onChange = { Prefs.setHomeRecommendations(ctx, "audio", it) },
+                )
+                PreferenceSwitch(
+                    key = "home_recommendations_video",
+                    title = tr("Recommended videos", "الفيديوهات المقترحة"),
+                    initial = Prefs.homeRecommendations(ctx, "video"),
+                    onChange = { Prefs.setHomeRecommendations(ctx, "video", it) },
+                )
+                Text(
+                    tr("Each section can also be reordered or hidden from Customize Home.",
+                        "يمكن أيضًا ترتيب كل قسم أو إخفاؤه من تخصيص الرئيسية."),
+                    color = Muted, fontSize = 12.sp,
+                )
+            }
+
+            SettingsCard(tr("Search and downloads", "البحث والتنزيلات")) {
+                BehaviorSwitchRow(
+                    tr("Play video preview in Search", "تشغيل معاينة الفيديو في البحث"),
+                    tr("Search results can be played inside their own card before you send them to Download.",
+                        "يمكن تشغيل نتائج البحث داخل بطاقتها قبل إرسالها إلى التنزيل."),
+                    searchPreview, vm::setSearchPreview,
+                )
+                BehaviorSwitchRow(
+                    tr("Add title, artist and cover art to downloads", "إضافة العنوان والفنان وصورة الغلاف للتنزيلات"),
+                    tr("Written into new downloads (cover art in MP3) so other music apps show them properly.",
+                        "تُكتب في التنزيلات الجديدة (صورة الغلاف في MP3) لتعرضها تطبيقات الموسيقى الأخرى بشكل صحيح."),
+                    embedMeta, vm::setEmbedMeta,
+                )
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(tr("Results per website in Search", "عدد النتائج لكل موقع في البحث"))
                     Text(
@@ -382,6 +351,30 @@ fun SettingsScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                         }
                     }
                 }
+            }
+
+            SettingsCard(tr("Library shortcuts", "اختصارات المكتبة")) {
+                PreferenceSwitch(
+                    key = "home_library_tabs",
+                    title = tr("Favorites and Playlists buttons on Home", "أزرار المفضلة وقوائم التشغيل في الرئيسية"),
+                    initial = Prefs.showHomeLibraryTabs(ctx),
+                    onChange = { Prefs.setShowHomeLibraryTabs(ctx, it) },
+                )
+                PreferenceSwitch(
+                    key = "media_library_tabs",
+                    title = tr("Favorites and Playlists buttons on Media", "أزرار المفضلة وقوائم التشغيل في الوسائط"),
+                    initial = Prefs.showMediaLibraryTabs(ctx),
+                    onChange = { Prefs.setShowMediaLibraryTabs(ctx, it) },
+                )
+            }
+
+            SettingsCard("Radar") {
+                BehaviorSwitchRow(
+                    tr("Show the Radar progress card", "إظهار بطاقة تقدّم الرادار"),
+                    tr("The live card under the listen button: the detection phases and each engine's state. Allowances stay in Settings → Radar Usage.",
+                        "البطاقة الحية تحت زر الاستماع: مراحل الكشف وحالة كل محرك. تبقى الحصص في الإعدادات ← استخدام الرادار."),
+                    DetectorPrefs.showCard,
+                ) { DetectorPrefs.changeShowCard(it) }
             }
 
             // ---- Search engines: which websites the Search tab looks in; add, edit or remove your own ----
@@ -425,9 +418,9 @@ fun SettingsScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                 }
             }
 
-            // ---- Detector Consumption: which recognition engines the Music Detector uses, and what is left of each allowance ----
+            // ---- Radar Usage: recognition engines and remaining allowances ----
             CollapsibleCard(
-                tr("Detector Consumption", "استهلاك الكاشف"),
+                tr("Radar Usage", "استخدام الرادار"),
                 summary = if (DetectorPrefs.useAll) tr("All engines", "كل المحركات") else DetectorPrefs.selected.joinToString(" • "),
             ) {
                 DetectorConsumptionContent()
@@ -625,6 +618,65 @@ private fun SettingsCard(title: String, content: @Composable ColumnScope.() -> U
     }
 }
 
+@Composable
+private fun categoryFilterSettings(ctx: android.content.Context, history: Boolean) {
+    val ids = listOf("all", "audio", "video", "youtube", "facebook")
+    var enabled by remember(history) {
+        mutableStateOf(ids.associateWith { Prefs.categoryFilter(ctx, history, it) })
+    }
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        ids.forEach { id ->
+            val label = when (id) {
+                "audio" -> tr("Audio", "صوت")
+                "video" -> tr("Video", "فيديو")
+                "youtube" -> "YouTube"
+                "facebook" -> "Facebook"
+                else -> tr("All", "الكل")
+            }
+            FilterChip(
+                selected = enabled[id] == true,
+                onClick = {
+                    val next = enabled[id] != true
+                    enabled = enabled + (id to next)
+                    Prefs.setCategoryFilter(ctx, history, id, next)
+                },
+                label = { Text(label) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun BehaviorSwitchRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title)
+            Text(description, color = Muted, fontSize = 12.sp)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun PreferenceSwitch(key: String, title: String, initial: Boolean, onChange: (Boolean) -> Unit) {
+    var checked by remember(key) { mutableStateOf(initial) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f), fontSize = 14.sp)
+        Switch(
+            checked = checked,
+            onCheckedChange = {
+                checked = it
+                onChange(it)
+            },
+        )
+    }
+}
+
 /** A card with a title and a short summary that opens another page when tapped. */
 @Composable
 private fun SettingsLinkCard(title: String, summary: String, onClick: () -> Unit) {
@@ -802,11 +854,15 @@ private fun LivePicturesCard() {
     val source by LiveWallpaper.source.collectAsStateWithLifecycle()
     val every by LiveWallpaper.every.collectAsStateWithLifecycle()
     val dim by LiveWallpaper.dim.collectAsStateWithLifecycle()
+    val bitmap by LiveWallpaper.bitmap.collectAsStateWithLifecycle()
     val busy by LiveWallpaper.busy.collectAsStateWithLifecycle()
     val credit by LiveWallpaper.credit.collectAsStateWithLifecycle()
     val error by LiveWallpaper.error.collectAsStateWithLifecycle()
     remember { LiveWallpaper.init(ctx) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { u -> if (u != null) LiveWallpaper.importPicture(ctx, u) }
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/jpeg")) { u ->
+        if (u != null) LiveWallpaper.exportPicture(ctx, u)
+    }
     CollapsibleCard(tr("Live pictures", "صور حيّة")) {
         Text(
             tr("A picture from the internet that changes by itself shows behind the app. No account is needed.",
@@ -857,6 +913,14 @@ private fun LivePicturesCard() {
                     Text(tr("Import", "استيراد"))
                 }
                 if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            }
+            OutlinedButton(
+                onClick = { export.launch("VibeVault-live-picture.jpg") },
+                enabled = bitmap != null && !busy,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(tr("Export current picture", "تصدير الصورة الحالية"))
             }
             if (credit.isNotBlank()) Text(tr("Now: $credit", "الآن: $credit"), color = Muted, fontSize = 12.sp, maxLines = 2)
             if (error.isNotBlank()) Text(tr("Couldn't update: $error", "تعذّر التحديث: $error"), color = Amber, fontSize = 12.sp)

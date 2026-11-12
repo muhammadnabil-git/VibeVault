@@ -258,7 +258,7 @@ fun Sym(res: Int, size: Dp = 18.dp, tint: Color = LocalContentColor.current) {
 fun LogoWatermark() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Image(
-            painter = painterResource(R.drawable.ic_logo_watermark),
+            painter = painterResource(R.drawable.vv_logo_wordmark),
             contentDescription = null,
             alpha = 0.07f,
             modifier = Modifier.size(300.dp),

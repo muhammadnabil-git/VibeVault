@@ -191,6 +191,7 @@ object Radio {
         val item = HistoryItem(
             name = st.name + ".radio", format = "MP3", quality = 0, sizeBytes = 0L,
             timeMillis = System.currentTimeMillis(), location = "radio", uri = st.url, sourceUrl = "",
+            artworkUrl = st.logo.takeIf { it.isNotBlank() },
         )
         PlayerHolder.playNow(ctx.applicationContext, listOf(item))
         scope.launch {      // polite to the directory: counts the listen so good stations rise in the ranking

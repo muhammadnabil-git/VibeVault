@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.platform.LocalContext
@@ -38,8 +40,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -50,7 +55,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         LiveWallpaper.init(applicationContext)
         SearchEngines.init(applicationContext)
-        handleIntent(intent)
+        handleIntent(intent, coldStart = true)
         setContent {
             val ar by vm.ar.collectAsStateWithLifecycle()
             val light by vm.lightMode.collectAsStateWithLifecycle()
@@ -62,7 +67,16 @@ class MainActivity : ComponentActivity() {
                 LocalAr provides ar,
                 LocalLayoutDirection provides if (ar) LayoutDirection.Rtl else LayoutDirection.Ltr,
             ) {
-                MaterialTheme(colorScheme = animatedScheme(if (themeId == THEME_WALLPAPER) wallpaperScheme(light) else schemeFor(themeId, light))) {
+                MaterialTheme(
+                    colorScheme = animatedScheme(if (themeId == THEME_WALLPAPER) wallpaperScheme(light) else schemeFor(themeId, light)),
+                    shapes = Shapes(
+                        extraSmall = RoundedCornerShape(10.dp),
+                        small = RoundedCornerShape(14.dp),
+                        medium = RoundedCornerShape(18.dp),
+                        large = RoundedCornerShape(24.dp),
+                        extraLarge = RoundedCornerShape(30.dp),
+                    ),
+                ) {
                     SystemBarsEffect(light)
                     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                         Box(Modifier.fillMaxSize()) {
@@ -83,7 +97,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIntent(intent)
+        handleIntent(intent, coldStart = false)
     }
 
     override fun onStart() {
@@ -99,7 +113,50 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Tapping the "download complete" notification opens the History tab (and the file details for groups). */
-    private fun handleIntent(i: Intent?) {
+    private fun handleIntent(i: Intent?, coldStart: Boolean) {
+        val authLink = i?.dataString?.takeIf {
+            i?.data?.host == "mediasaver-c3ee7.firebaseapp.com" &&
+                i?.data?.path?.startsWith("/__/auth/links") == true
+        }
+        if (!authLink.isNullOrBlank()) {
+            i.data = null
+            lifecycleScope.launch {
+                try {
+                    when (VaultRecovery.completeEmailLink(applicationContext, authLink)) {
+                        RecoveryLinkPurpose.SETUP -> {
+                            val hasPin = VaultStore.hasPin(applicationContext)
+                            if (!hasPin) {
+                                if (coldStart) {
+                                    VaultStore.screenOpen.value = true
+                                    vm.openSettings()
+                                }
+                                android.widget.Toast.makeText(
+                                    this@MainActivity,
+                                    L.t("Recovery email verified. Set your vault PIN.", "تم تأكيد بريد الاسترداد. عيّن رمز الخزنة."),
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        }
+                        RecoveryLinkPurpose.RESET -> {
+                            VaultStore.authorizePinReset()
+                            vm.openSettings()
+                            android.widget.Toast.makeText(
+                                this@MainActivity,
+                                L.t("Recovery email verified. Choose a new vault PIN.", "تم تأكيد بريد الاسترداد. اختر رمزًا جديدًا للخزنة."),
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                        null -> Unit
+                    }
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(
+                        this@MainActivity,
+                        e.message ?: "The recovery link could not be verified.",
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
         if (i != null && i.getBooleanExtra(EXTRA_BT_OPEN, false)) {
             // started by a Bluetooth device connecting: show the player as soon as the first track is ready
             vm.requestOpenPlayerWhenReady()
@@ -197,10 +254,14 @@ fun App(vm: DownloaderViewModel) {
         } else if (browserUrl != null) {
             BrowserScreen(vm, browserUrl.orEmpty(), onClose = vm::closeBrowser)
         } else if (radioOpen) {
-            RadioScreen(vm, onClose = vm::closeRadio)
+            Box(Modifier.weight(1f).fillMaxWidth().mainPagesSwipe(1, vm)) {
+                RadioScreen(vm, onClose = vm::closeRadio)
+            }
             if (queue.isNotEmpty() && !Radio.isRadioPlaying()) MiniPlayer(onOpen = vm::openPlayer, onStop = vm::stopPlayback)
         } else if (detectorOpen) {
-            DetectorScreen(vm, onClose = vm::closeDetector)
+            Box(Modifier.weight(1f).fillMaxWidth().mainPagesSwipe(0, vm)) {
+                DetectorScreen(vm, onClose = vm::closeDetector)
+            }
         } else if (settingsOpen) {
             SettingsScreen(vm, onClose = vm::closeSettings)
         } else if (favoritesOpen || playlistsOpen) {
@@ -260,7 +321,7 @@ fun App(vm: DownloaderViewModel) {
             if (queue.isNotEmpty()) {
                 MiniPlayer(onOpen = vm::openPlayer, onStop = vm::stopPlayback)
             }
-            BottomTabs(false, false, vm)
+            if (Prefs.showHomeLibraryTabs(ctx)) BottomTabs(false, false, vm)
         } else {
             // ---- a page opened from VV: its own window with a back arrow; Back (button or gesture) returns to VV
             BackHandler { vm.setTab(4) }
@@ -296,7 +357,13 @@ fun App(vm: DownloaderViewModel) {
                 }
             }
 
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+            val swipePage = when (tab) {
+                1 -> 2
+                2 -> 3
+                3 -> 4
+                else -> null
+            }
+            Box(Modifier.weight(1f).fillMaxWidth().then(if (swipePage == null) Modifier else Modifier.mainPagesSwipe(swipePage, vm))) {
                 LogoWatermark()
                 when (tab) {
                     0 -> FeedTab(vm)
@@ -309,6 +376,7 @@ fun App(vm: DownloaderViewModel) {
             if (queue.isNotEmpty()) {
                 MiniPlayer(onOpen = vm::openPlayer, onStop = vm::stopPlayback)
             }
+            if (tab == 2 && Prefs.showMediaLibraryTabs(ctx)) BottomTabs(false, false, vm)
         }
     }
 
@@ -455,5 +523,33 @@ private fun RowScope.BottomTab(selected: Boolean, label: String, onClick: () -> 
     ) {
         icon(color)
         Text(label, color = color, fontSize = 11.sp, maxLines = 1)
+    }
+}
+
+private fun Modifier.mainPagesSwipe(page: Int, vm: DownloaderViewModel): Modifier = pointerInput(page) {
+    var drag = 0f
+    val threshold = 72.dp.toPx()
+    detectHorizontalDragGestures(
+        onHorizontalDrag = { _, amount -> drag += amount },
+        onDragEnd = {
+            if (abs(drag) >= threshold) {
+                val destination = page + if (drag < 0f) 1 else -1
+                if (destination in 0..4) openMainSwipePage(vm, destination)
+            }
+            drag = 0f
+        },
+        onDragCancel = { drag = 0f },
+    )
+}
+
+private fun openMainSwipePage(vm: DownloaderViewModel, page: Int) {
+    vm.closeDetector()
+    vm.closeRadio()
+    when (page) {
+        0 -> { vm.setTab(4); vm.openDetector() }
+        1 -> { vm.setTab(4); vm.openRadio() }
+        2 -> vm.setTab(1)
+        3 -> vm.setTab(2)
+        4 -> vm.setTab(3)
     }
 }

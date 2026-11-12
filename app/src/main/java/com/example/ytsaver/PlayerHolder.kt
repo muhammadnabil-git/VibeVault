@@ -2,6 +2,8 @@ package com.example.ytsaver
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -11,11 +13,13 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.ByteArrayOutputStream
 
 fun prettyName(name: String): String = name.substringBeforeLast('.').replace('_', ' ')
 
@@ -45,13 +49,21 @@ object PlayerHolder {
     @Synchronized
     fun get(ctx: Context): ExoPlayer {
         player?.let { return it }
-        val http = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true)
+        val http = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(30_000)
         val upstream = ResolvingDataSource.Factory(DefaultDataSource.Factory(ctx.applicationContext, http)) { spec ->
             val h = streamHeaders[spec.uri.toString()]
             if (h != null) spec.withAdditionalHeaders(h) else spec
         }
         val p = ExoPlayer.Builder(ctx.applicationContext)
             .setMediaSourceFactory(DefaultMediaSourceFactory(upstream))
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(50_000, 120_000, 1_500, 10_000)
+                    .build(),
+            )
             .setAudioAttributes(MEDIA_ATTRIBUTES, true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)       // keeps the CPU and Wi-Fi awake while a stream plays with the screen off
@@ -128,11 +140,37 @@ object PlayerHolder {
                 name = m.mediaMetadata.title?.toString() ?: m.mediaId.substringAfterLast('/'),
                 format = "MP3", quality = 0, sizeBytes = 0L, timeMillis = System.currentTimeMillis(),
                 location = "", uri = m.mediaId, sourceUrl = "",
+                artworkUrl = m.mediaMetadata.artworkUri?.toString(),
             )
         }
     }
 
     fun peek(): ExoPlayer? = player
+
+    fun updateArtwork(item: HistoryItem, bitmap: Bitmap) {
+        val p = player ?: return
+        if (android.os.Looper.myLooper() != p.applicationLooper) {
+            main.post { updateArtwork(item, bitmap) }
+            return
+        }
+        val index = _entries.value.indexOfFirst { it.uri == item.uri }
+        if (index !in 0 until p.mediaItemCount) return
+        val mediaItem = p.getMediaItemAt(index)
+        if (mediaItem.mediaMetadata.artworkData != null) return
+        if (item.location == "radio" && mediaItem.mediaMetadata.artworkUri != null) return
+
+        val bytes = ByteArrayOutputStream().use { output ->
+            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)) return
+            output.toByteArray()
+        }
+        val metadata = mediaItem.mediaMetadata.buildUpon()
+            .setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+            .build()
+        val isCurrent = index == p.currentMediaItemIndex
+        val position = if (isCurrent) p.currentPosition else 0L
+        p.replaceMediaItem(index, mediaItem.buildUpon().setMediaMetadata(metadata).build())
+        if (isCurrent) p.seekTo(index, position)
+    }
 
     private val MEDIA_ATTRIBUTES: AudioAttributes = AudioAttributes.Builder()
         .setUsage(C.USAGE_MEDIA)
@@ -170,12 +208,15 @@ object PlayerHolder {
         p.setAudioAttributes(MEDIA_ATTRIBUTES, true)
     }
 
-    private fun mediaItemOf(h: HistoryItem): MediaItem =
-        MediaItem.Builder()
+    private fun mediaItemOf(h: HistoryItem): MediaItem {
+        val metadata = MediaMetadata.Builder().setTitle(prettyName(h.name))
+        h.artworkUrl?.takeIf { it.startsWith("http") }?.let { metadata.setArtworkUri(Uri.parse(it)) }
+        return MediaItem.Builder()
             .setMediaId(h.uri)
             .setUri(h.uri)
-            .setMediaMetadata(MediaMetadata.Builder().setTitle(prettyName(h.name)).build())
+            .setMediaMetadata(metadata.build())
             .build()
+    }
 
     private fun ensureService(ctx: Context) {
         try {

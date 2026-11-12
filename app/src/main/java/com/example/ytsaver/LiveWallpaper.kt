@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -151,6 +152,29 @@ object LiveWallpaper {
                 _error.value = (e.message ?: e.javaClass.simpleName).take(120)
             } finally {
                 _busy.value = false
+            }
+        }
+    }
+
+    /** Copies the currently stored live picture to a destination chosen by the user. */
+    fun exportPicture(ctx: Context, uri: android.net.Uri) {
+        val app = ctx.applicationContext
+        scope.launch {
+            try {
+                val source = File(app.filesDir, FILE)
+                if (!source.isFile) throw java.io.IOException("No live picture is available")
+                val output = app.contentResolver.openOutputStream(uri, "wt")
+                    ?: throw java.io.IOException("Could not open the destination")
+                source.inputStream().use { input -> output.use { input.copyTo(it) } }
+                withContext(Dispatchers.Main) {
+                    toast(app, L.t("Live picture exported.", "تم تصدير الصورة الحية."))
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    toast(app, L.t("Couldn't export the live picture.", "تعذّر تصدير الصورة الحية."))
+                }
             }
         }
     }

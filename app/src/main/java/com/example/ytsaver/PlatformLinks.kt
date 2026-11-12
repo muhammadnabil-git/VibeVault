@@ -33,6 +33,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.Locale
 import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -188,6 +189,12 @@ object LinkResolver {
         if (u.contains("music.youtube.com")) return u
         val id = Regex("(?:[?&]v=|youtu\\.be/)([A-Za-z0-9_-]{11})").find(u)?.groupValues?.get(1) ?: return null
         return "https://music.youtube.com/watch?v=$id"
+    }
+
+    fun youtubeVideoUrlFromMusic(u: String): String? {
+        if (hostOf(u) != "music.youtube.com") return null
+        val id = Regex("""[?&]v=([A-Za-z0-9_-]{11})""").find(u)?.groupValues?.get(1) ?: return null
+        return "https://www.youtube.com/watch?v=$id"
     }
 
     private fun youtubeFromMusic(u: String) = u.replace("://music.youtube.com/", "://www.youtube.com/")
@@ -536,7 +543,13 @@ object LinkResolver {
 
     // ---------------------------------------------------------------- unofficial links (the same recording, another upload)
 
-    private class Cand(val url: String, val title: String, val uploader: String, val durationSec: Long)
+    private class Cand(
+        val url: String,
+        val title: String,
+        val uploader: String,
+        val durationSec: Long,
+        val thumbUrl: String? = null,
+    )
 
     /** Words that make a different recording of a song (live, cover, remix...). Both sides must have the same ones. */
     private val VARIANT = Regex(
@@ -688,7 +701,13 @@ object LinkResolver {
                     if (vid.length == 11 && cols.size >= 2 && cols[0].isNotBlank()) {
                         val d = Regex("(?:(\\d+):)?(\\d{1,2}):(\\d{2})\\s*$").find(cols[1].trim())
                         val sec = if (d == null) 0L else (d.groupValues[1].toLongOrNull() ?: 0L) * 3600 + d.groupValues[2].toLong() * 60 + d.groupValues[3].toLong()
-                        out += Cand("https://music.youtube.com/watch?v=$vid", cols[0], cols[1], sec)
+                        val thumbs = r.optJSONObject("thumbnail")
+                            ?.optJSONObject("musicThumbnailRenderer")
+                            ?.optJSONObject("thumbnail")
+                            ?.optJSONArray("thumbnails")
+                        val thumb = thumbs?.optJSONObject((thumbs.length() - 1).coerceAtLeast(0))
+                            ?.optString("url")?.takeIf { it.startsWith("http") }
+                        out += Cand("https://music.youtube.com/watch?v=$vid", cols[0], cols[1], sec, thumb)
                     }
                 }
                 node.keys().forEach { k -> ytmItems(node.opt(k), out) }
@@ -703,6 +722,42 @@ object LinkResolver {
         if (parts.firstOrNull()?.lowercase() in listOf("song", "video")) parts.removeAt(0)
         val artist = parts.firstOrNull() ?: return null
         return c.title to artist
+    }
+
+    fun youtubeMusicSearch(query: String, limit: Int, region: String): List<FeedItem>? {
+        val locale = Locale.getDefault()
+        val body = JSONObject()
+            .put(
+                "context",
+                JSONObject().put(
+                    "client",
+                    JSONObject()
+                        .put("clientName", "WEB_REMIX")
+                        .put("clientVersion", "1.20241023.01.00")
+                        .put("hl", locale.language.ifBlank { "en" })
+                        .put("gl", region.uppercase(Locale.ROOT)),
+                ),
+            )
+            .put("query", query)
+            .toString()
+        val response = postJson(
+            "https://music.youtube.com/youtubei/v1/search?prettyPrint=false&key=AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30",
+            body,
+        ) ?: return null
+        val candidates = ArrayList<Cand>()
+        ytmItems(response, candidates)
+        return candidates.distinctBy { it.url }.take(limit.coerceAtLeast(1)).mapNotNull { item ->
+            val id = Regex("v=([A-Za-z0-9_-]{11})").find(item.url)?.groupValues?.get(1) ?: return@mapNotNull null
+            FeedItem(
+                url = item.url,
+                title = item.title,
+                uploader = ytmNames(item)?.second ?: item.uploader.substringBefore(" • "),
+                durationSec = item.durationSec,
+                thumbUrl = item.thumbUrl ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg",
+                site = "YouTube Music",
+                isAudio = true,
+            )
+        }
     }
 
     /** The video id of this very recording on YouTube Music, or null (not found, or the service could not be asked). */

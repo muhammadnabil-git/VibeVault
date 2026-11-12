@@ -127,14 +127,20 @@ fun BulkAddToPlaylistDialog(count: Int, onCurrent: () -> Unit, onPlaylist: (Play
 
 /** Pick a playlist for these entries, or create a new one. */
 @Composable
-fun AddToPlaylistDialog(entries: List<PlEntry>, onNowPlaying: (() -> Unit)? = null, onDismiss: () -> Unit) {
+fun AddToPlaylistDialog(
+    entries: List<PlEntry>,
+    onNowPlaying: (() -> Unit)? = null,
+    allowedKinds: Set<String>? = null,
+    onDismiss: () -> Unit,
+) {
     val ctx = LocalContext.current
     val playlists by Library.playlists.collectAsStateWithLifecycle()
+    val visiblePlaylists = playlists.filter { allowedKinds == null || it.kind in allowedKinds }
     var creating by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
-    var newKind by remember {
+    var newKind by remember(entries, allowedKinds) {
         mutableStateOf(
-            when {
+            allowedKinds?.firstOrNull() ?: when {
                 entries.all { it.localUri != null } -> KIND_LOCAL
                 entries.all { it.localUri == null } -> KIND_ONLINE
                 else -> KIND_MIXED
@@ -157,9 +163,6 @@ fun AddToPlaylistDialog(entries: List<PlEntry>, onNowPlaying: (() -> Unit)? = nu
         title = { Text(tr("Add to playlist", "إضافة إلى قائمة تشغيل")) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (playlists.isEmpty() && !creating) {
-                    Text(tr("You have no playlists yet. Create one:", "ليس لديك قوائم تشغيل بعد. أنشئ واحدة:"), color = Muted)
-                }
                 if (onNowPlaying != null) {
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { onNowPlaying(); onDismiss() }.padding(vertical = 8.dp, horizontal = 4.dp),
@@ -170,7 +173,10 @@ fun AddToPlaylistDialog(entries: List<PlEntry>, onNowPlaying: (() -> Unit)? = nu
                         Text(tr("Add to now playing", "إضافة إلى التشغيل الحالي"), fontWeight = FontWeight.SemiBold)
                     }
                 }
-                playlists.forEach { p ->
+                if (visiblePlaylists.isEmpty() && !creating) {
+                    Text(tr("No compatible playlists yet. Create one:", "لا توجد قوائم متوافقة بعد. أنشئ واحدة:"), color = Muted)
+                }
+                visiblePlaylists.forEach { p ->
                     val ok = entries.any { accepts(p.kind, it) }
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(enabled = ok) { addTo(p) }.padding(vertical = 8.dp, horizontal = 4.dp),
@@ -190,7 +196,7 @@ fun AddToPlaylistDialog(entries: List<PlEntry>, onNowPlaying: (() -> Unit)? = nu
                         label = { Text(tr("Playlist name", "اسم القائمة")) }, modifier = Modifier.fillMaxWidth(),
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(KIND_LOCAL, KIND_ONLINE, KIND_MIXED).forEach { k ->
+                        (allowedKinds?.toList() ?: listOf(KIND_LOCAL, KIND_ONLINE, KIND_MIXED)).forEach { k ->
                             FilterChip(selected = newKind == k, onClick = { newKind = k }, label = { Text(kindLabel(k).substringBefore(" (").substringBefore("(").trim(), fontSize = 12.sp) })
                         }
                     }
@@ -1067,7 +1073,7 @@ fun FavoritesScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                     ) {
                         Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Box {
-                                RemoteThumb(e.thumbUrl, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)))
+                                FavoriteCover(e, Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)), 24.dp)
                                 if (selectMode) Checkbox(checked = picked, onCheckedChange = { selectedKeys = if (picked) selectedKeys - e.key else selectedKeys + e.key }, modifier = Modifier.align(Alignment.TopStart))
                             }
                             Text(e.title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -1103,7 +1109,14 @@ fun FavoritesScreen(vm: DownloaderViewModel, onClose: () -> Unit) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 if (selectMode) Checkbox(checked = picked, onCheckedChange = { toggle() })
-                                RemoteThumb(e.thumbUrl, Modifier.size(width = 96.dp, height = 54.dp).clip(RoundedCornerShape(8.dp)))
+                                FavoriteCover(
+                                    e,
+                                    Modifier.size(
+                                        width = if (e.isAudio) 96.dp else 150.dp,
+                                        height = if (e.isAudio) 54.dp else 88.dp,
+                                    ).clip(RoundedCornerShape(8.dp)),
+                                    20.dp,
+                                )
                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text(e.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     Text(

@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.ytsaver"
         minSdk = 29
         targetSdk = 35
-        versionCode = 100
-        versionName = "7.7.1"
+        versionCode = 101
+        versionName = "7.7.2"
         ndk { abiFilters += listOf("arm64-v8a") } // add "armeabi-v7a" for old 32-bit phones
     }
 
@@ -67,6 +67,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
@@ -77,7 +78,7 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
 
     // Firebase: Google sign-in (Auth) + playlist / settings sync (Firestore)
-    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
+    implementation(platform("com.google.firebase:firebase-bom:33.9.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
     implementation("androidx.credentials:credentials:1.3.0")

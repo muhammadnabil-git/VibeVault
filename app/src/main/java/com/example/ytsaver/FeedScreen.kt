@@ -529,7 +529,7 @@ private fun FeedResult(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (!previewing) {
-                    Box(Modifier.width(128.dp).height(72.dp).clip(RoundedCornerShape(10.dp))) {
+                    Box(Modifier.width(150.dp).height(88.dp).clip(RoundedCornerShape(10.dp))) {
                         RemoteThumb(url = item.thumbUrl, bitmap = item.thumb, modifier = Modifier.fillMaxSize())
                         val badge = formatDuration(durationSec)
                         if (badge.isNotEmpty()) {

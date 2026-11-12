@@ -45,8 +45,8 @@ class FullscreenOrientation(private val activity: Activity?) {
             wasPortrait = act.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
             active = true
         }
-        // sensor landscape: either landscape side works, the picture never turns upside down by mistake
-        act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        // Force landscape even when the device's auto-rotate setting is off.
+        act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
     }
 
     fun exit() {

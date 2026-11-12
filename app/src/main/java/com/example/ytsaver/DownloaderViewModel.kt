@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,9 +27,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 /**
  * One link box in the Download tab. Every box has its own format + quality.
@@ -602,6 +605,173 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
     private val _feed = MutableStateFlow(FeedState())
     val feed: StateFlow<FeedState> = _feed.asStateFlow()
     private var feedJob: Job? = null
+    private val _recommendations = MutableStateFlow(HomeRecommendations())
+    val recommendations: StateFlow<HomeRecommendations> = _recommendations.asStateFlow()
+    private var recommendationJob: Job? = null
+
+    /**
+     * Keep Home recommendations in the ViewModel so changing pages does not discard results.
+     * The only callers are app startup, Search, and successful download completion.
+     */
+    fun refreshRecommendations(searchQuery: String? = null) {
+        searchQuery?.let { RecommendationActivity.recordSearch(app, it) }
+        recommendationJob?.cancel()
+        val saved = HistoryStore.items.value.toList()
+        val searches = RecommendationActivity.searches(app)
+        val played = PlayLog.recent(app, 40)
+        val musicTopics = RecommendationActivity.topics(searches, saved, played, audio = true)
+        val videoTopics = RecommendationActivity.topics(
+            searches = searches.take(5),
+            history = saved,
+            playedUris = played,
+            audio = false,
+            limit = 5,
+        )
+        val region = Locale.getDefault().country.takeIf { it.matches(Regex("[A-Za-z]{2}")) }?.uppercase(Locale.ROOT) ?: "US"
+        val country = Locale("", region).getDisplayCountry(Locale.ENGLISH).ifBlank { region }
+        val musicTrendingQuery = "Trending songs in $country"
+        val videoRegion = "EG"
+        val videoTrendingQueries = listOf(
+            "ترند مصر اليوم",
+            "الفيديوهات الرائجة في مصر",
+            "ترند الشرق الأوسط",
+            "الفيديوهات الرائجة في العالم العربي",
+        )
+        val personalizedVideoQueries = videoTopics.map { "$it مصر عربي" }
+        val musicQueries = if (musicTopics.isEmpty()) listOf(musicTrendingQuery) else musicTopics.map { "$it songs" }
+        val musicFallback = FeedItem(
+            url = "https://music.youtube.com/charts?gl=$region",
+            title = "Trending music in $country",
+            uploader = "YouTube Music charts",
+            durationSec = 0L,
+            thumbUrl = null,
+            site = "YouTube Music",
+            isAudio = true,
+        )
+        val videoFallback = FeedItem(
+            url = "https://charts.youtube.com/charts/TopVideos/$videoRegion",
+            title = L.t("Trending videos in Egypt", "فيديوهات رائجة في مصر"),
+            uploader = "YouTube charts",
+            durationSec = 0L,
+            thumbUrl = null,
+            site = "YouTube",
+            isAudio = false,
+        )
+        val youtube = SiteSpec("YouTube", "ytsearch", null, false)
+
+        _recommendations.update { it.copy(loading = true, musicFailed = false, videosFailed = false) }
+        recommendationJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                withTimeoutOrNull(20_000L) { DownloadEngine.state.first { it.engineReady } }
+                var music = interleaveRecommendationResults(
+                    searchRecommendationMusic(musicQueries, region).filterNotNull(),
+                    distinctKey = RecommendationActivity::artistKey,
+                )
+                    .filter { hostOf(it.url).contains("music.youtube.com") }
+                    .map { it.copy(site = "YouTube Music", isAudio = true) }
+
+                if (music.isEmpty() && musicQueries != listOf(musicTrendingQuery)) {
+                    music = interleaveRecommendationResults(
+                        searchRecommendationMusic(listOf(musicTrendingQuery), region).filterNotNull(),
+                        distinctKey = RecommendationActivity::artistKey,
+                    )
+                        .filter { hostOf(it.url).contains("music.youtube.com") }
+                        .map { it.copy(site = "YouTube Music", isAudio = true) }
+                }
+
+                _recommendations.update { current ->
+                    current.copy(
+                        music = music.ifEmpty { current.music.ifEmpty { listOf(musicFallback) } },
+                        musicFailed = music.isEmpty(),
+                        loading = true,
+                    )
+                }
+
+                warmRecommendationTracks(music)
+
+                val personalizedVideoResults = searchRecommendationVideos(personalizedVideoQueries, youtube)
+                val personalizedVideos = prioritizePersonalizedRecommendations(
+                    personalized = interleaveRecommendationResults(
+                        personalizedVideoResults.filterNotNull(),
+                        limit = 25,
+                    )
+                        .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
+                        .map { it.copy(site = "YouTube", isAudio = false) },
+                    regional = emptyList(),
+                )
+                val regionalVideos = if (personalizedVideos.size < 17) {
+                    interleaveRecommendationResults(
+                        searchRecommendationVideos(videoTrendingQueries, youtube, limit = 20).filterNotNull(),
+                        limit = 20,
+                    )
+                        .filter { hostOf(it.url).let { host -> host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be" } }
+                        .filter { RecommendationActivity.hasArabicMetadata(it) }
+                        .map { it.copy(site = "YouTube", isAudio = false) }
+                } else {
+                    emptyList()
+                }
+                val videos = prioritizePersonalizedRecommendations(personalizedVideos, regionalVideos)
+
+                _recommendations.update { current ->
+                    current.copy(
+                        music = music.ifEmpty { current.music.ifEmpty { listOf(musicFallback) } },
+                        videos = videos.ifEmpty { current.videos.ifEmpty { listOf(videoFallback) } },
+                        musicFailed = music.isEmpty(),
+                        videosFailed = videos.isEmpty(),
+                        loading = false,
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _recommendations.update {
+                    it.copy(
+                        music = it.music.ifEmpty { listOf(musicFallback) },
+                        videos = it.videos.ifEmpty { listOf(videoFallback) },
+                        musicFailed = true,
+                        videosFailed = true,
+                        loading = false,
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun warmRecommendationTracks(items: List<FeedItem>) = coroutineScope {
+        items.mapNotNull { LinkResolver.youtubeVideoUrlFromMusic(it.url) }
+            .distinct()
+            .take(2)
+            .map { url ->
+                async {
+                    try {
+                        FeedLoader.playableStream(url, audio = true)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+            }
+            .forEach { it.await() }
+    }
+
+    private suspend fun searchRecommendationMusic(queries: List<String>, region: String): List<List<FeedItem>?> =
+        coroutineScope {
+            queries.map { query ->
+                async { LinkResolver.youtubeMusicSearch(query, 5, region) }
+            }.map { it.await() }
+        }
+
+    private suspend fun searchRecommendationVideos(
+        queries: List<String>,
+        site: SiteSpec,
+        limit: Int = 5,
+    ): List<List<FeedItem>?> =
+        coroutineScope {
+            queries.map { query ->
+                async { FeedLoader.searchSiteTimed(site, query, limit) }
+            }.map { it.await() }
+        }
 
     fun setFeedQuery(q: String) { _feed.update { it.copy(query = q) } }
 
@@ -724,6 +894,7 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
         if (q.isEmpty()) return
         feedJob?.cancel()
         previewJob?.cancel()
+        recommendationJob?.cancel()
         val link = parseLinks(q).firstOrNull()
         val limit = _searchLimit.value
         val sites = if (link != null) listOf(LINK_SITE) else SEARCH_SITES.map { it.label }
@@ -741,6 +912,9 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
                 if (link != null) {
                     val items = try { FeedLoader.search(q) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
                     publishSite(LINK_SITE, items?.map { it.copy(site = siteLabelOf(it.url), isAudio = guessIsAudio(it.url)) }, false)
+                    refreshRecommendations(items?.firstOrNull()?.let { result ->
+                        result.uploader.takeIf { it.isNotBlank() } ?: result.title
+                    })
                 } else {
                     coroutineScope {
                         SEARCH_SITES.forEach { spec ->
@@ -768,6 +942,7 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
                     )
                 }
             }
+            if (link == null) refreshRecommendations(q)
         }
     }
 
@@ -1060,10 +1235,10 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
         viewModelScope.launch(Dispatchers.IO) {
             HistoryStore.load(app)
             NotificationStore.load(app)
-            if (DownloadEngine.ensureInit(app)) {
-                // every time the app is opened: bring the download engine up to date automatically
+            if (DownloadEngine.ensureInit(app) && Prefs.engineStale(app)) {
+                // Avoid replacing the engine on every launch; streaming and downloads use it too.
                 if (DownloadEngine.updateEngine(app, auto = true)) Prefs.setFirstUpdateDone(app)
-                else if (Prefs.engineStale(app)) {
+                else {
                     NotificationStore.addOnce(
                         app, "ENGINE_NEEDS_UPDATE",
                         L.t("Engine update recommended", "يُنصح بتحديث المحرك"),
@@ -1073,13 +1248,17 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
                     )
                 }
             }
+            refreshRecommendations()
         }
         // When a download finishes while the app is on screen, jump to the History tab
         viewModelScope.launch {
             var last = Phase.Idle
             DownloadEngine.state.collect { s ->
                 if (s.phase == Phase.Done && last != Phase.Done && appInForeground && _autoHistory.value) _tab.value = 2
-                if (last == Phase.Working && s.phase != Phase.Working) finishRun(s)
+                if (last == Phase.Working && s.phase != Phase.Working) {
+                    finishRun(s)
+                    if (s.phase == Phase.Done && s.okKeys.any { it !in s.badKeys }) refreshRecommendations()
+                }
                 last = s.phase
             }
         }
@@ -1137,6 +1316,7 @@ class DownloaderViewModel(private val app: Application) : AndroidViewModel(app) 
     /** Hands links to the download service. Works while another download is running: they join the queue. */
     private fun startDownload(ready: List<PendingLink>): Boolean {
         if (ready.isEmpty()) return false
+        recommendationJob?.cancel()
         val wasWorking = state.value.phase == Phase.Working
         if (!wasWorking) DownloadEngine.markStarting() // blocks double taps until the service takes over
         try {

@@ -516,13 +516,15 @@ fun MiniPlayer(onOpen: () -> Unit, onStop: () -> Unit) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).clickable(onClick = onOpen),
     ) {
         Row(
-            Modifier.padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            Modifier.padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            TrackArtImage(cur, Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)), iconSize = 22.dp)
+            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(prettyName(cur.name), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Text(
-                    tr("Now playing", "قيد التشغيل") + " • ${snap.index + 1}/${snap.count}",
+                    "${miniPlayerTime(posMs)} / ${miniPlayerTime(durMs)} • ${snap.index + 1}/${snap.count}",
                     color = Muted, fontSize = 11.sp,
                 )
             }
@@ -576,4 +578,9 @@ fun MiniPlayer(onOpen: () -> Unit, onStop: () -> Unit) {
         }
         Spacer(Modifier.height(2.dp))
     }
+}
+
+private fun miniPlayerTime(positionMs: Long): String {
+    val seconds = (positionMs / 1000L).coerceAtLeast(0L)
+    return "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
 }

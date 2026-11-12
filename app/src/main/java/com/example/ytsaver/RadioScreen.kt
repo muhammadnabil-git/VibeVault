@@ -2,6 +2,7 @@ package com.example.ytsaver
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -358,8 +359,8 @@ private fun RadioBody(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.clickable(onClick = onType)) {
-                Text(fmText(tenths), fontSize = 60.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = glow(cs.primary))
-                Text("  MHz FM", fontSize = 14.sp, color = glow(cs.primary).copy(alpha = 0.7f), modifier = Modifier.padding(bottom = 12.dp))
+                Text(fmText(tenths), fontSize = 38.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = glow(cs.primary))
+                Text("  MHz FM", fontSize = 12.sp, color = glow(cs.primary).copy(alpha = 0.7f), modifier = Modifier.padding(bottom = 8.dp))
             }
             FmDial(tenths, stations, onTune)
             Text(tr("tap the number to type a frequency", "اضغط على الرقم لكتابة التردد"), color = Color(0xFF7C8590), fontSize = 11.sp)
@@ -373,6 +374,7 @@ private fun FmDial(tenths: Int, stations: List<RadioStation>, onTune: (Int) -> U
     val primary = glow(MaterialTheme.colorScheme.primary)
     val measurer = rememberTextMeasurer()
     val tune by rememberUpdatedState(onTune)
+    val animatedTenths by animateFloatAsState(tenths.toFloat(), animationSpec = tween(280), label = "fm-frequency")
     val marks = remember(stations) { stations.mapNotNull { st -> st.tenths?.let { t -> t to st } }.groupBy({ it.first }, { it.second }).mapValues { (_, v) -> v.any { it.ok } } }
     val labelStyle = TextStyle(color = Color(0xFF9AA3AD), fontSize = 10.sp)
 
@@ -389,10 +391,11 @@ private fun FmDial(tenths: Int, stations: List<RadioStation>, onTune: (Int) -> U
             },
     ) {
         val w = size.width
-        fun x(t: Int) = (t - FM_MIN).toFloat() / (FM_MAX - FM_MIN) * w
+        fun xFloat(t: Float) = (t - FM_MIN).coerceIn(0f, (FM_MAX - FM_MIN).toFloat()) / (FM_MAX - FM_MIN) * w
+        fun xInt(t: Int) = xFloat(t.toFloat())
         // station dots
         marks.forEach { (t, ok) ->
-            drawCircle(if (ok) primary else Color(0xFF55606B), radius = if (ok) 3.2.dp.toPx() else 2.dp.toPx(), center = Offset(x(t), 6.dp.toPx()))
+            drawCircle(if (ok) primary else Color(0xFF55606B), radius = if (ok) 3.2.dp.toPx() else 2.dp.toPx(), center = Offset(xInt(t), 6.dp.toPx()))
         }
         // ticks: every 0.1 short, every 0.5 medium, every whole MHz long
         val base = size.height - 16.dp.toPx()
@@ -400,15 +403,17 @@ private fun FmDial(tenths: Int, stations: List<RadioStation>, onTune: (Int) -> U
             val whole = t % 10 == 0
             val half = t % 5 == 0
             val len = if (whole) 22.dp.toPx() else if (half) 14.dp.toPx() else 7.dp.toPx()
-            drawLine(Color(0xFF6B7682), Offset(x(t), base), Offset(x(t), base - len), strokeWidth = if (whole) 1.6f else 1f)
-            if (t % 50 == 0 && t >= 900) {
+            drawLine(Color(0xFF6B7682), Offset(xInt(t), base), Offset(xInt(t), base - len), strokeWidth = if (whole) 1.6f else 1f)
+            if (t in setOf(880, 920, 960, 1000, 1040, 1080)) {
                 val r = measurer.measure((t / 10).toString(), labelStyle)
-                drawText(r, topLeft = Offset(x(t) - r.size.width / 2f, base + 2.dp.toPx()))
+                drawText(r, topLeft = Offset(xInt(t) - r.size.width / 2f, base + 2.dp.toPx()))
             }
         }
         // needle
-        val nx = x(tenths)
-        drawRect(primary.copy(alpha = 0.16f), topLeft = Offset(nx - 7.dp.toPx(), 0f), size = Size(14.dp.toPx(), base))
+        val nx = xFloat(animatedTenths)
+        drawCircle(primary.copy(alpha = 0.18f), radius = 11.dp.toPx(), center = Offset(nx, base - 10.dp.toPx()))
+        drawCircle(primary.copy(alpha = 0.32f), radius = 6.dp.toPx(), center = Offset(nx, base - 10.dp.toPx()))
+        drawRect(primary.copy(alpha = 0.08f), topLeft = Offset(nx - 5.dp.toPx(), 0f), size = Size(10.dp.toPx(), base))
         drawLine(primary, Offset(nx, 0f), Offset(nx, base), strokeWidth = 2.6f)
         val tri = Path().apply {
             moveTo(nx - 6.dp.toPx(), base + 1.dp.toPx()); lineTo(nx + 6.dp.toPx(), base + 1.dp.toPx()); lineTo(nx, base - 8.dp.toPx()); close()
